@@ -1,0 +1,13 @@
+# Data privacy
+
+National IDs, KRA PINs, names, phone numbers, addresses, next-of-kin details, M-Pesa profiles, consent signatures' recorded names and verification notes are sensitive. The summary view includes contact and payment information and is also sensitive. National ID, KRA PIN and detailed addresses are deliberately omitted from that view.
+
+Use fictional records only for development. Test phones and identifiers contain `TEST` and cannot be mistaken for routable phone numbers or verified identity documents. Do not send farmer data to external services. Never commit real farmer data, exports, `.env`, dumps or Docker volume files. The generated `.env` is mode 0600 and ignored. Backup scripts use a private umask; backups are ignored, but remain readable by the local account. Keep them on an access-controlled disk and remove them through a deliberate retention policy.
+
+PostgreSQL listens through Docker on 127.0.0.1 only. Other local applications and users with Docker privileges are still within the trust boundary. Docker administrators can inspect container environment variables. Avoid sharing `docker compose config`, environment dumps or SQL result logs. Passwords are not included in scripts or SQL, and scripts do not print them. Development connections are local, not configured with TLS.
+
+Before using real data: establish application authorization and least-privilege roles; agree retention, lawful consent wording, withdrawal handling, backup recovery objectives and privileged change auditing. This is an engineering handling policy, not a legal compliance determination. Communication consent is independent; it is never forced true by the core consent constraint. Historical `consent_obtained` on a verification is evidence of that past check, not proof of currently effective consent.
+
+Encryption can be added with managed keys and selected ciphertext/search-token columns. Decide searchable fields and key rotation before changing uniqueness semantics. Do not roll out custom cryptography casually. Existing backups would need corresponding protection and key recovery procedures.
+
+Consent records allow only a one-time withdrawal update; corrections create new evidence. Verification rows reject UPDATE/DELETE, but the owner can bypass triggers and TRUNCATE remains administrative: this is not tamper-proof auditing. No automatic PII purge or unrestricted application role is provided.
