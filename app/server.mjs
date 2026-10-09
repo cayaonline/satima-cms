@@ -1,12 +1,12 @@
 import http from 'node:http';
+import {requestPolicy} from './hosting.mjs';
 import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
 if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<16)throw new Error('CMS_PASSWORD must be at least 16 characters.');
 const sessions=new Map(),attempts=new Map(),ttl=8*3600*1000;
 const hash=s=>createHash('sha256').update(s).digest();
-const port=Number(process.env.PORT||3000),publicPort=process.env.CMS_PORT||String(port);
-const hosts=new Set([`127.0.0.1:${publicPort}`,`localhost:${publicPort}`,`127.0.0.1:${port}`]);
+const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css']};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
@@ -17,10 +17,11 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
  try {
- if(!hosts.has(req.headers.host))throw new Problem(403,'Invalid local host.');
+ // Render health probes can use an internal host; this route returns no farmer data.
+ if(req.url==='/health'&&req.method==='GET'){await pool.query('SELECT 1');return send(res,200,{status:'healthy'});}
+ if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
- if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!=='http://'+req.headers.host)throw new Problem(403,'Use the local application to submit changes.');
- if(path==='/health'&&req.method==='GET'){await pool.query('SELECT 1');return send(res,200,{status:'healthy'});}
+ if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
  if(files[path]&&req.method==='GET'){const [f,mime]=files[path];res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/login'&&req.method==='POST'){
  const key=req.socket.remoteAddress;let a=attempts.get(key);if(!a||a.until<Date.now())a={count:0,until:Date.now()+900000};
@@ -28,11 +29,11 @@ const server=http.createServer(async(req,res)=>{
  const b=await body(req);a.count++;attempts.set(key,a);
  if(typeof b.password!=='string'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect password.');
  attempts.delete(key);const token=randomBytes(32).toString('hex');sessions.set(token,Date.now()+ttl);
- res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}`);return send(res,200,{ok:true});
+ res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
  }
  const token=session(req);if(!token)throw new Problem(401,'Sign in to continue.');
  if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Local operator'});
- if(path==='/api/logout'&&req.method==='POST'){sessions.delete(token);res.setHeader('Set-Cookie','satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true});}
+ if(path==='/api/logout'&&req.method==='POST'){sessions.delete(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
  if(path==='/api/farmers'&&req.method==='GET'){
  const q=(url.searchParams.get('q')||'').slice(0,100),scope=url.searchParams.get('scope')||'registered';
  const where=`($1='' OR f.full_name ILIKE '%'||$1||'%' OR f.customer_id ILIKE '%'||$1||'%' OR f.primary_phone ILIKE '%'||$1||'%') AND ($2='all' OR ($2='registered' AND f.registered_by<>'TEST STAFF') OR ($2='demo' AND f.registered_by='TEST STAFF'))`;

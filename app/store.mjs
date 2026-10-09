@@ -1,5 +1,5 @@
 import pg from 'pg';
-export const pool = new pg.Pool({max:8,connectionTimeoutMillis:5000,statement_timeout:10000});
+export const pool = new pg.Pool({connectionString:process.env.DATABASE_URL,max:8,connectionTimeoutMillis:5000,statement_timeout:10000});
 export class Problem extends Error {constructor(status,message){super(message);this.status=status;}}
 const fields=['registered_business_name','full_name','national_id','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','kra_pin','registration_date','registered_by','status'];
 export function text(value, name, required=false, max=300) {

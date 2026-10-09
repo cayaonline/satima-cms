@@ -1,0 +1,11 @@
+const admin=process.env.ADMIN_DATABASE_URL,password=process.env.APP_DB_PASSWORD;
+if(!admin||!password||password.length<24)throw new Error('Hosted database credentials are required.');
+const url=new URL(admin);
+if(url.pathname!=='/satima_cms')throw new Error('Expected the satima_cms database.');
+url.username='satima_app';url.password=password;
+process.env.DATABASE_URL=url.toString();
+process.env.LISTEN_HOST='0.0.0.0';
+if(!process.env.PUBLIC_ORIGIN&&!process.env.RENDER_EXTERNAL_URL)throw new Error('Hosted public origin is required.');
+delete process.env.ADMIN_DATABASE_URL;
+delete process.env.APP_DB_PASSWORD;
+await import('../server.mjs');

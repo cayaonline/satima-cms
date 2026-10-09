@@ -20,6 +20,10 @@ The directory defaults to actual registrations. Demo records remain available un
 
 See [installation and private database transfer](docs/other-computers.md). Run `make setup` on a fresh clone to create per-computer credentials, then `make start`. Separate local copies do not synchronize; a shared live database requires a hosting service.
 
+## Shared online deployment
+
+[Deploy on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms) using the prepared [hosting and private data-transfer guide](docs/render-deployment.md). This creates paid hosting resources after your approval. A new deployment is empty until the private database is transferred. The eventual Render HTTPS service URL is the shared application link.
+
 ## Requirements and first start
 
 Docker Desktop (running), Git, Python 3, Make and a terminal. Local development tests additionally use Node.js and `npm ci --prefix app`; the running app needs no host Node installation. PostgreSQL client tools run inside the container; host PostgreSQL and MySQL are not used or modified.
@@ -78,7 +82,7 @@ UUIDs use built-in `gen_random_uuid()`. `customer_id` uses an atomic PostgreSQL 
 - [Inspection SQL](database/schema/sample-queries.sql)
 - [Validation report](docs/validation.md)
 
-The application uses the restricted `satima_app` database role, not the administrator. A shared local password protects all farmer endpoints; cookies are HttpOnly/SameSite=Strict, writes require the local Origin, and sessions expire after eight hours or app restart. Both services bind to localhost. This is a single-operator local tool, not a hosted multi-user deployment. Add individual accounts, HTTPS and reviewed authorization before remote access.
+The application uses the restricted `satima_app` database role, not the administrator. A shared operator password protects all farmer endpoints; cookies are HttpOnly/SameSite=Strict, writes require the configured Origin, and sessions expire after eight hours or app restart. Local services bind to localhost. The optional Render deployment uses HTTPS, Secure cookies and the same shared operator login; it does not provide individual staff identities. Share access only with trusted operators.
 
 Consent and verification now support NULL = not recorded. Source references and original transcriptions remain separate from editable records. Database triggers audit inserts/updates with before/after values; the application cannot modify audit rows or delete farmers. App edits are attributed to Local operator; this is not individual staff identity.
 
