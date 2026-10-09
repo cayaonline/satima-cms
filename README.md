@@ -1,17 +1,30 @@
 # Satima Farmhouse / Morning Dew Operations CMS
 
-Phase 1: local PostgreSQL foundation for farmer registration and farmer master data. No application, authentication, payments integration or milk collection system is included.
+Local farmer registration and master-data workspace: PostgreSQL, a small Node.js API, and a browser interface. Includes five paper-form registrations with deferred cleaning notes. Milk collection, processing and payment integrations are not built.
+
+## Open the local CMS
+
+Start Docker Desktop, then:
+
+```sh
+cd ~/Developer/satima-cms
+make start
+make copy-password
+```
+
+Open **http://127.0.0.1:3000** and paste the copied password into the login screen. `make copy-password` copies only `CMS_PASSWORD` from `.env` to your macOS clipboard; it does not print the password. Existing installation credentials are already configured. `make start` starts PostgreSQL, checks migrations, configures the separate app role and builds/starts the application.
+
+The directory defaults to actual registrations. Demo records remain available under the Show dropdown and are never deleted automatically. Open a farmer to edit master/contact/payment details or see consent, verification, source transcription, change history and cleaning notes. New records default to pending verification. Marking a note resolved requires an explanation and does not silently alter consent evidence.
 
 ## Requirements and first start
 
-Docker Desktop (running), Git, Python 3, Make and a terminal. PostgreSQL client tools run inside the container; host PostgreSQL and MySQL are not used or modified.
+Docker Desktop (running), Git, Python 3, Make and a terminal. Local development tests additionally use Node.js and `npm ci --prefix app`; the running app needs no host Node installation. PostgreSQL client tools run inside the container; host PostgreSQL and MySQL are not used or modified.
 
 ```sh
 cd ~/Developer/satima-cms
 # .env is already configured locally. For a fresh clone:
-# cp .env.example .env  # replace its placeholder password with a random password
-make up
-make migrate
+# cp .env.example .env  # replace all three placeholder passwords with random passwords
+make start
 make seed                 # optional; fictional development fixtures only
 make test
 ```
@@ -26,9 +39,12 @@ Docker Desktop's bundled CLI is supported even if `docker` is absent from PATH. 
 
 ```sh
 make status
+make start               # migrate and rebuild the app after code changes
+make copy-password       # copy local login password, without displaying it
+make app-test            # Node tests; requires npm ci --prefix app
 make db-shell
 make logs
-make down                # stops containers; retains data volume
+make down                # stops app and database; retains data volume
 make up
 make migrate             # skips applied migrations; checks SHA256 hashes
 make seed                # inserts missing fixtures by fixed UUID, does not update them
@@ -58,6 +74,10 @@ UUIDs use built-in `gen_random_uuid()`. `customer_id` uses an atomic PostgreSQL 
 - [Inspection SQL](database/schema/sample-queries.sql)
 - [Validation report](docs/validation.md)
 
-The local bootstrap user is an administrator, **not a future application role**. Add least-privilege application roles and authorization before real data or an API. Status changes replace soft deletion; historical consent and verification evidence is retained. General master-data change auditing and retention/deletion workflows remain future work.
+The application uses the restricted `satima_app` database role, not the administrator. A shared local password protects all farmer endpoints; cookies are HttpOnly/SameSite=Strict, writes require the local Origin, and sessions expire after eight hours or app restart. Both services bind to localhost. This is a single-operator local tool, not a hosted multi-user deployment. Add individual accounts, HTTPS and reviewed authorization before remote access.
+
+Consent and verification now support NULL = not recorded. Source references and original transcriptions remain separate from editable records. Database triggers audit inserts/updates with before/after values; the application cannot modify audit rows or delete farmers. App edits are attributed to Local operator; this is not individual staff identity.
+
+See [current app and data-cleaning notes](docs/farmer-management.md). Real PDF files, transcriptions and browser screenshots are kept under ignored `data/private/`, with private permissions. Backups now contain real PII and audit values: keep them private. The source PDF must be backed up separately from PostgreSQL. Original test fixtures remain fictional; never seed real records through source-controlled SQL.
 
 Upstream references: [PostgreSQL releases](https://www.postgresql.org/docs/release/) and [Docker PostgreSQL storage guide](https://docs.docker.com/guides/postgresql/immediate-setup-and-data-persistence/).

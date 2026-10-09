@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict NSbVcXdwmycMAww9YWqW3hkD6lSEDaNkeWCP9Aduc5N4qibR8uBVXGKsZHOCQRc
+\restrict y9blpros20iTm7kF7e4VzA6ReTr9xiJusk98JUfhWTJfIWdLTTBkPWHmSS53HAK
 
 -- Dumped from database version 18.6 (Debian 18.6-1.pgdg13+2)
 -- Dumped by pg_dump version 18.6 (Debian 18.6-1.pgdg13+2)
@@ -29,6 +29,24 @@ CREATE TYPE public.farmer_status AS ENUM (
     'suspended',
     'pending_verification'
 );
+
+
+--
+-- Name: audit_farmer_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.audit_farmer_change() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'public'
+    AS $$
+DECLARE fid uuid;
+BEGIN
+ IF TG_TABLE_NAME = 'farmers' THEN fid := NEW.id; ELSE fid := NEW.farmer_id; END IF;
+ INSERT INTO public.farmer_audit_events(farmer_id,table_name,operation,actor,before_record,after_record)
+ VALUES(fid,TG_TABLE_NAME,TG_OP,coalesce(nullif(current_setting('app.actor',true),''),session_user),
+ CASE WHEN TG_OP='UPDATE' THEN to_jsonb(OLD) ELSE NULL END,to_jsonb(NEW));
+ RETURN NEW;
+END $$;
 
 
 --
@@ -125,6 +143,36 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: farmer_audit_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.farmer_audit_events (
+    id bigint NOT NULL,
+    farmer_id uuid NOT NULL,
+    table_name text NOT NULL,
+    operation text NOT NULL,
+    actor text NOT NULL,
+    before_record jsonb,
+    after_record jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: farmer_audit_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.farmer_audit_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.farmer_audit_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
 -- Name: farmer_consents; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -132,20 +180,22 @@ CREATE TABLE public.farmer_consents (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     farmer_id uuid NOT NULL,
     consent_version text NOT NULL,
-    information_accuracy_confirmed boolean NOT NULL,
-    data_processing_consent boolean NOT NULL,
-    communications_consent boolean NOT NULL,
-    consent_given boolean NOT NULL,
+    information_accuracy_confirmed boolean,
+    data_processing_consent boolean,
+    communications_consent boolean,
+    consent_given boolean,
     signed_name text,
     signature_method text,
     consent_date timestamp with time zone NOT NULL,
     withdrawn_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT confirmed_consent_requires_explicit_evidence CHECK (((consent_given IS DISTINCT FROM true) OR ((information_accuracy_confirmed IS TRUE) AND (data_processing_consent IS TRUE) AND (signed_name IS NOT NULL) AND (btrim(signed_name) <> ''::text) AND (signature_method IS NOT NULL)))),
     CONSTRAINT farmer_consents_check CHECK (((NOT consent_given) OR (information_accuracy_confirmed AND data_processing_consent AND (signed_name IS NOT NULL) AND (btrim(signed_name) <> ''::text) AND (signature_method IS NOT NULL)))),
     CONSTRAINT farmer_consents_check1 CHECK (((withdrawn_at IS NULL) OR (consent_given AND (withdrawn_at >= consent_date)))),
     CONSTRAINT farmer_consents_consent_version_check CHECK ((btrim(consent_version) <> ''::text)),
-    CONSTRAINT farmer_consents_signature_method_check CHECK ((signature_method = ANY (ARRAY['signature'::text, 'thumbprint'::text, 'digital'::text])))
+    CONSTRAINT farmer_consents_signature_method_check CHECK ((signature_method = ANY (ARRAY['signature'::text, 'thumbprint'::text, 'digital'::text]))),
+    CONSTRAINT withdrawal_requires_confirmed_consent CHECK (((withdrawn_at IS NULL) OR (consent_given IS TRUE)))
 );
 
 
@@ -183,6 +233,29 @@ CREATE SEQUENCE public.farmer_customer_number
 
 
 --
+-- Name: farmer_data_issues; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.farmer_data_issues (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    farmer_id uuid NOT NULL,
+    field_name text NOT NULL,
+    description text NOT NULL,
+    severity text DEFAULT 'review'::text NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    resolution_note text,
+    resolved_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT farmer_data_issues_check CHECK ((((status = 'open'::text) AND (resolved_at IS NULL)) OR ((status = 'resolved'::text) AND (resolved_at IS NOT NULL) AND (resolution_note IS NOT NULL) AND (btrim(resolution_note) <> ''::text)))),
+    CONSTRAINT farmer_data_issues_description_check CHECK ((btrim(description) <> ''::text)),
+    CONSTRAINT farmer_data_issues_field_name_check CHECK ((btrim(field_name) <> ''::text)),
+    CONSTRAINT farmer_data_issues_severity_check CHECK ((severity = ANY (ARRAY['review'::text, 'high'::text]))),
+    CONSTRAINT farmer_data_issues_status_check CHECK ((status = ANY (ARRAY['open'::text, 'resolved'::text])))
+);
+
+
+--
 -- Name: farmer_payment_profiles; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -205,19 +278,38 @@ CREATE TABLE public.farmer_payment_profiles (
 
 
 --
+-- Name: farmer_registration_sources; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.farmer_registration_sources (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    farmer_id uuid NOT NULL,
+    document_name text NOT NULL,
+    document_sha256 text NOT NULL,
+    first_page integer NOT NULL,
+    last_page integer NOT NULL,
+    raw_transcription jsonb NOT NULL,
+    imported_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT farmer_registration_sources_check CHECK ((last_page >= first_page)),
+    CONSTRAINT farmer_registration_sources_document_sha256_check CHECK ((document_sha256 ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT farmer_registration_sources_first_page_check CHECK ((first_page > 0))
+);
+
+
+--
 -- Name: farmer_verifications; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.farmer_verifications (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     farmer_id uuid NOT NULL,
-    national_id_verified boolean DEFAULT false NOT NULL,
-    kra_pin_verified boolean DEFAULT false NOT NULL,
-    primary_phone_verified boolean DEFAULT false NOT NULL,
-    mpesa_number_verified boolean DEFAULT false NOT NULL,
-    mpesa_registered_name_confirmed boolean DEFAULT false NOT NULL,
-    registration_form_complete boolean DEFAULT false NOT NULL,
-    consent_obtained boolean DEFAULT false NOT NULL,
+    national_id_verified boolean,
+    kra_pin_verified boolean,
+    primary_phone_verified boolean,
+    mpesa_number_verified boolean,
+    mpesa_registered_name_confirmed boolean,
+    registration_form_complete boolean,
+    consent_obtained boolean,
     verified_by text NOT NULL,
     verified_at timestamp with time zone DEFAULT now() NOT NULL,
     notes text,
@@ -337,6 +429,14 @@ CREATE TABLE public.schema_migrations (
 
 
 --
+-- Name: farmer_audit_events farmer_audit_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_audit_events
+    ADD CONSTRAINT farmer_audit_events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: farmer_consents farmer_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -353,11 +453,35 @@ ALTER TABLE ONLY public.farmer_contacts
 
 
 --
+-- Name: farmer_data_issues farmer_data_issues_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_data_issues
+    ADD CONSTRAINT farmer_data_issues_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: farmer_payment_profiles farmer_payment_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.farmer_payment_profiles
     ADD CONSTRAINT farmer_payment_profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: farmer_registration_sources farmer_registration_sources_document_sha256_first_page_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_registration_sources
+    ADD CONSTRAINT farmer_registration_sources_document_sha256_first_page_key UNIQUE (document_sha256, first_page);
+
+
+--
+-- Name: farmer_registration_sources farmer_registration_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_registration_sources
+    ADD CONSTRAINT farmer_registration_sources_pkey PRIMARY KEY (id);
 
 
 --
@@ -406,6 +530,13 @@ ALTER TABLE ONLY public.farmers
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: audit_farmer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_farmer ON public.farmer_audit_events USING btree (farmer_id, created_at DESC);
 
 
 --
@@ -458,6 +589,13 @@ CREATE INDEX farmers_registration_date ON public.farmers USING btree (registrati
 
 
 --
+-- Name: issues_farmer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX issues_farmer ON public.farmer_data_issues USING btree (farmer_id, status);
+
+
+--
 -- Name: payments_farmer; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -476,6 +614,13 @@ CREATE UNIQUE INDEX payments_one_active ON public.farmer_payment_profiles USING 
 --
 
 CREATE INDEX payments_phone ON public.farmer_payment_profiles USING btree (mpesa_phone_number);
+
+
+--
+-- Name: sources_farmer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sources_farmer ON public.farmer_registration_sources USING btree (farmer_id);
 
 
 --
@@ -521,6 +666,13 @@ CREATE TRIGGER farmers_updated BEFORE UPDATE ON public.farmers FOR EACH ROW EXEC
 
 
 --
+-- Name: farmer_data_issues issues_updated; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER issues_updated BEFORE UPDATE ON public.farmer_data_issues FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+
+
+--
 -- Name: farmer_payment_profiles payments_updated; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -535,10 +687,67 @@ CREATE TRIGGER payments_verification_guard BEFORE UPDATE ON public.farmer_paymen
 
 
 --
+-- Name: farmer_consents record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_consents FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmer_contacts record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_contacts FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmer_data_issues record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_data_issues FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmer_payment_profiles record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_payment_profiles FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmer_registration_sources record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_registration_sources FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmer_verifications record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmer_verifications FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
+-- Name: farmers record_audit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER record_audit AFTER INSERT OR UPDATE ON public.farmers FOR EACH ROW EXECUTE FUNCTION public.audit_farmer_change();
+
+
+--
 -- Name: farmer_verifications verifications_immutable; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER verifications_immutable BEFORE DELETE OR UPDATE ON public.farmer_verifications FOR EACH ROW EXECUTE FUNCTION public.reject_history_change();
+
+
+--
+-- Name: farmer_audit_events farmer_audit_events_farmer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_audit_events
+    ADD CONSTRAINT farmer_audit_events_farmer_id_fkey FOREIGN KEY (farmer_id) REFERENCES public.farmers(id) ON DELETE RESTRICT;
 
 
 --
@@ -558,11 +767,27 @@ ALTER TABLE ONLY public.farmer_contacts
 
 
 --
+-- Name: farmer_data_issues farmer_data_issues_farmer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_data_issues
+    ADD CONSTRAINT farmer_data_issues_farmer_id_fkey FOREIGN KEY (farmer_id) REFERENCES public.farmers(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: farmer_payment_profiles farmer_payment_profiles_farmer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.farmer_payment_profiles
     ADD CONSTRAINT farmer_payment_profiles_farmer_id_fkey FOREIGN KEY (farmer_id) REFERENCES public.farmers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: farmer_registration_sources farmer_registration_sources_farmer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.farmer_registration_sources
+    ADD CONSTRAINT farmer_registration_sources_farmer_id_fkey FOREIGN KEY (farmer_id) REFERENCES public.farmers(id) ON DELETE RESTRICT;
 
 
 --
@@ -577,4 +802,4 @@ ALTER TABLE ONLY public.farmer_verifications
 -- PostgreSQL database dump complete
 --
 
-\unrestrict NSbVcXdwmycMAww9YWqW3hkD6lSEDaNkeWCP9Aduc5N4qibR8uBVXGKsZHOCQRc
+\unrestrict y9blpros20iTm7kF7e4VzA6ReTr9xiJusk98JUfhWTJfIWdLTTBkPWHmSS53HAK

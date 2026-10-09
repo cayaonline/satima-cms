@@ -9,3 +9,5 @@ echo 'Stop application writers first. Make a backup before restoring.'
 read -r -p 'Type RESTORE to continue: ' answer
 [[ "$answer" == RESTORE ]] || { echo 'Cancelled'; exit 1; }
 compose exec -T postgres sh -c 'exec pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --no-acl --exit-on-error --single-transaction' < "$file"
+# pg_dump excludes ACLs: restore the reviewed local app grants after restoring tables.
+python3 database/scripts/configure-app.py

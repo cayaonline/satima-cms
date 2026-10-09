@@ -18,5 +18,31 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+  app:
+    build: ./app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: satima_app
+      PGPASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD}
+      CMS_PASSWORD: ${CMS_PASSWORD:?Set CMS_PASSWORD}
+      CMS_PORT: ${CMS_PORT:-3000}
+      PORT: 3000
+      LISTEN_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${CMS_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 volumes:
   postgres_data:

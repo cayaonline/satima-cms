@@ -6,3 +6,7 @@ database/backups/*
 .DS_Store
 __pycache__/
 *.pyc
+
+node_modules/
+data/private/
+app/test-results/
