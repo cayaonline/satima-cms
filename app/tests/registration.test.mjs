@@ -56,3 +56,32 @@ test('HTTP requires login and same-origin writes; sessions, search and profile e
  assert.equal((await fetch(base+'/api/logout',{method:'POST',headers,body:'{}'})).status,200);
  assert.equal((await fetch(base+'/api/farmers',{headers})).status,401);
 });
+test('full profile edits save unknown dates, tri-state evidence and cleaning notes atomically',async()=>{
+ const c=await pool.connect();await c.query('BEGIN');
+ const revision=async id=>(await c.query('SELECT updated_at::text AS revision FROM farmers WHERE id=$1',[id])).rows[0].revision;
+ try{
+ const f=await createFarmer(c,{...fixture,registration_date:null});
+ assert.equal(f.registration_date,null);
+ const {rows:[issue]}=await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'phone','Confirm digits') RETURNING *,updated_at::text AS revision",[f.id]);
+ const verification={previous_id:null,national_id_verified:true,kra_pin_verified:false,primary_phone_verified:null,mpesa_number_verified:true,mpesa_registered_name_confirmed:true,registration_form_complete:false,consent_obtained:null,verified_by:'TEST OFFICER',verified_at:'2026-10-02T12:00:00+03:00',notes:'Test evidence'};
+ const consent={previous_id:null,consent_version:'TEST',information_accuracy_confirmed:true,data_processing_consent:true,communications_consent:false,consent_given:true,signed_name:'TEST',signature_method:'signature',consent_date:'2026-10-01T00:00:00+03:00'};
+ const edit={...fixture,registration_date:null,revision:await revision(f.id),verification,consent,payment:{...fixture.payment,verified:true,verified_at:'2026-10-02T12:00:00+03:00'},issues:[{...issue,description:'Confirmed digits',status:'resolved',resolution_note:'Confirmed by farmer'}]};
+ await updateFarmer(c,f.id,edit);
+ const {rows:[v]}=await c.query('SELECT * FROM farmer_verifications WHERE farmer_id=$1',[f.id]);
+ assert.equal(v.kra_pin_verified,false);assert.equal(v.primary_phone_verified,null);assert.equal(v.national_id_verified,true);
+ assert.equal((await c.query('SELECT registration_date FROM farmers WHERE id=$1',[f.id])).rows[0].registration_date,null);
+ assert.equal((await c.query('SELECT verified FROM farmer_payment_profiles WHERE farmer_id=$1 AND is_active',[f.id])).rows[0].verified,true);
+ assert.equal((await c.query('SELECT status,description FROM farmer_data_issues WHERE id=$1',[issue.id])).rows[0].status,'resolved');
+ const {rows:[cons]}=await c.query('SELECT * FROM farmer_consents WHERE farmer_id=$1',[f.id]);assert.equal(cons.communications_consent,false);
+ await updateFarmer(c,f.id,{...fixture,revision:await revision(f.id),verification:{...verification,previous_id:v.id,kra_pin_verified:true}});
+ assert.equal((await c.query('SELECT count(*)::int AS n FROM farmer_verifications WHERE farmer_id=$1',[f.id])).rows[0].n,2);
+ assert.equal((await c.query('SELECT kra_pin_verified FROM farmer_verifications WHERE id=$1',[v.id])).rows[0].kra_pin_verified,false);
+ await c.query('SAVEPOINT stale');
+ await assert.rejects(updateFarmer(c,f.id,{...edit,revision:await revision(f.id)}),e=>e.status===409);
+ await c.query('ROLLBACK TO SAVEPOINT stale');
+ const before=await revision(f.id);
+ await c.query('SAVEPOINT note');
+ await assert.rejects(updateFarmer(c,f.id,{...fixture,revision:before,issues:[{...issue,status:'resolved',resolution_note:''}]}),e=>e.status===400);
+ await c.query('ROLLBACK TO SAVEPOINT note');assert.equal(await revision(f.id),before);
+ }finally{await c.query('ROLLBACK');c.release();}
+});

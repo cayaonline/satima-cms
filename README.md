@@ -1,6 +1,6 @@
 # Satima Farmhouse / Morning Dew Operations CMS
 
-Local farmer registration and master-data workspace: PostgreSQL, a small Node.js API, and a browser interface. Includes five paper-form registrations with deferred cleaning notes. Milk collection, processing and payment integrations are not built.
+Local farmer registration and master-data workspace: PostgreSQL, a small Node.js API, and a browser interface. The current local database includes 22 paper-form registrations with deferred cleaning notes. Real records are not included in GitHub clones. Milk collection, processing and payment integrations are not built.
 
 ## Open the local CMS
 
@@ -16,6 +16,10 @@ Open **http://127.0.0.1:3000** and paste the copied password into the login scre
 
 The directory defaults to actual registrations. Demo records remain available under the Show dropdown and are never deleted automatically. Open a farmer to edit master/contact/payment details or see consent, verification, source transcription, change history and cleaning notes. New records default to pending verification. Marking a note resolved requires an explanation and does not silently alter consent evidence.
 
+## Run on another computer
+
+See [installation and private database transfer](docs/other-computers.md). Run `make setup` on a fresh clone to create per-computer credentials, then `make start`. Separate local copies do not synchronize; a shared live database requires a hosting service.
+
 ## Requirements and first start
 
 Docker Desktop (running), Git, Python 3, Make and a terminal. Local development tests additionally use Node.js and `npm ci --prefix app`; the running app needs no host Node installation. PostgreSQL client tools run inside the container; host PostgreSQL and MySQL are not used or modified.
@@ -23,7 +27,7 @@ Docker Desktop (running), Git, Python 3, Make and a terminal. Local development 
 ```sh
 cd ~/Developer/satima-cms
 # .env is already configured locally. For a fresh clone:
-# cp .env.example .env  # replace all three placeholder passwords with random passwords
+make setup               # creates credentials only if .env does not exist
 make start
 make seed                 # optional; fictional development fixtures only
 make test

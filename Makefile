@@ -22,3 +22,7 @@ app-test:
 .PHONY: copy-password
 copy-password:
 	@python3 app/scripts/copy-password.py
+
+.PHONY: setup
+setup:
+	@python3 scripts/setup-local.py

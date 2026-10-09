@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict y9blpros20iTm7kF7e4VzA6ReTr9xiJusk98JUfhWTJfIWdLTTBkPWHmSS53HAK
+\restrict hvjABPeZdIDI8yeVY6kVIsA4GF0cwtzYoYbcDsabyRDqqoE8nxJI4Wcbh2VUR9n
 
 -- Dumped from database version 18.6 (Debian 18.6-1.pgdg13+2)
 -- Dumped by pg_dump version 18.6 (Debian 18.6-1.pgdg13+2)
@@ -338,7 +338,7 @@ CREATE TABLE public.farmers (
     sub_county text,
     county text,
     kra_pin text,
-    registration_date date DEFAULT CURRENT_DATE NOT NULL,
+    registration_date date DEFAULT CURRENT_DATE,
     registered_by text NOT NULL,
     status public.farmer_status DEFAULT 'pending_verification'::public.farmer_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -802,4 +802,4 @@ ALTER TABLE ONLY public.farmer_verifications
 -- PostgreSQL database dump complete
 --
 
-\unrestrict y9blpros20iTm7kF7e4VzA6ReTr9xiJusk98JUfhWTJfIWdLTTBkPWHmSS53HAK
+\unrestrict hvjABPeZdIDI8yeVY6kVIsA4GF0cwtzYoYbcDsabyRDqqoE8nxJI4Wcbh2VUR9n

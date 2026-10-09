@@ -12,10 +12,12 @@ try{
   for(const record of data.records){
    const exists=await c.query('SELECT 1 FROM farmer_registration_sources WHERE document_sha256=$1 AND first_page=$2',[actual,record.first_page]);
    if(exists.rowCount){skipped++;continue;}
+   const duplicate=await c.query(`SELECT 1 FROM farmers WHERE national_id=$1 OR kra_pin=$2 OR lower(full_name)=lower($3) OR regexp_replace(primary_phone,'[^0-9]','','g')=regexp_replace($4,'[^0-9]','','g')`,[record.farmer.national_id,record.farmer.kra_pin,record.farmer.full_name,record.farmer.primary_phone]);
+   if(duplicate.rowCount)throw new Error('Possible duplicate farmer; review source before importing.');
    const f=await createFarmer(c,{...record.farmer,status:'pending_verification'});
    await c.query('INSERT INTO farmer_registration_sources(farmer_id,document_name,document_sha256,first_page,last_page,raw_transcription) VALUES($1,$2,$3,$4,$5,$6)',[f.id,data.document_name,actual,record.first_page,record.last_page,JSON.stringify(record.raw)]);
    await c.query(`INSERT INTO farmer_consents(farmer_id,consent_version,information_accuracy_confirmed,data_processing_consent,communications_consent,consent_given,signed_name,signature_method,consent_date)
-   VALUES($1,$2,NULL,NULL,NULL,NULL,$3,'signature',$4)`,[f.id,'paper-unversioned-'+actual.slice(0,12),record.consent.signed_name,record.consent.date+'T00:00:00+03:00']);
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[f.id,'paper-unversioned-'+actual.slice(0,12),...['information_accuracy_confirmed','data_processing_consent','communications_consent','consent_given'].map(k=>record.consent[k]??null),record.consent.signed_name,record.consent.signature_method??null,record.consent.date+'T00:00:00+03:00']);
    const checks=['national_id_verified','kra_pin_verified','primary_phone_verified','mpesa_number_verified','mpesa_registered_name_confirmed','registration_form_complete','consent_obtained'];
    await c.query(`INSERT INTO farmer_verifications(farmer_id,${checks.join(',')},verified_by,verified_at,notes) VALUES(${Array.from({length:11},(_,i)=>'$'+(i+1)).join(',')})`,[f.id,...checks.map(k=>record.verification[k]??null),record.verification.by,record.verification.date+'T00:00:00+03:00',record.verification.notes]);
    for(const i of record.issues)await c.query('INSERT INTO farmer_data_issues(farmer_id,field_name,description,severity) VALUES($1,$2,$3,$4)',[f.id,i.field,i.description,i.severity||'review']);
