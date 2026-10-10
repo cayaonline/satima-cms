@@ -45,14 +45,14 @@ header strong{color:var(--ink);font-weight:600}
 .table-wrap table{min-width:850px;table-layout:fixed}
 .table-wrap th{position:relative;font-weight:600;letter-spacing:.6px;padding-block:14px}
 .table-wrap td{vertical-align:middle;padding-block:16px;line-height:1.55}
-.table-wrap th:nth-child(1){width:125px}
-.table-wrap th:nth-child(2){width:25%}
-.table-wrap th:nth-child(3){width:18%}
-.table-wrap th:nth-child(4){width:145px}
-.table-wrap th:nth-child(5){width:165px}
-.table-wrap th:nth-child(6){width:90px}
-.table-wrap th:nth-child(7){width:80px}
-.table-wrap td:nth-child(2),.table-wrap td:nth-child(3),.table-wrap td:nth-child(4){white-space:normal;overflow-wrap:anywhere}
+.table-wrap th:nth-child(1){width:80px}
+.table-wrap th:nth-child(2){width:125px}
+.table-wrap th:nth-child(3){width:25%}
+.table-wrap th:nth-child(4){width:18%}
+.table-wrap th:nth-child(5){width:145px}
+.table-wrap th:nth-child(6){width:165px}
+.table-wrap th:nth-child(7){width:90px}
+.table-wrap td:nth-child(3),.table-wrap td:nth-child(4),.table-wrap td:nth-child(5){white-space:normal;overflow-wrap:anywhere}
 .table-wrap tbody tr{transition:background-color .15s ease}
 .table-wrap tbody tr:hover{background:#f4f7f1}
 .farmer-id{font-variant-numeric:tabular-nums;font-weight:600;color:var(--green);letter-spacing:.2px}
