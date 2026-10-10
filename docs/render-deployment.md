@@ -1,5 +1,7 @@
 # Shared online CMS: Render Free + Neon Free
 
+Live application: **https://satima-cms.onrender.com**. Deployed and verified 10 October 2026 on Render Free and Neon Free (PostgreSQL 18, Frankfurt), without adding a payment card. All 22 actual registrations and 5 separate demos were transferred privately; customer IDs and all nine database tables matched the Mac copy after restore. HTTPS login, search, profile evidence, write validation and logout passed. Cloud login details are kept in an ignored private local file and in Render secrets.
+
 The existing CMS runs on one free Render Node web service. Its persistent PostgreSQL database is hosted separately on Neon Free. The interface, schema and registration behavior are preserved. GitHub contains code only; farmer records, PDFs, backups and credentials remain private.
 
 ## Setup
