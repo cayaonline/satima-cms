@@ -6,6 +6,7 @@ after(()=>pool.end());
 const params=o=>new URLSearchParams(o);
 test('directory validates structured filters and keeps free text parameterized',()=>{
  const query=directoryQuery(params({q:'100%_\\literal',sort:'customer_id',direction:'asc'}));assert(query.sql.includes('::numeric asc'));assert(query.values.includes('%100\\%\\_\\\\literal%'));assert(!query.sql.includes('literal'));assert.equal(query.pageSize,50);
+ const defaults=directoryQuery(params({}));assert.equal(defaults.sort,'customer_id');assert.equal(defaults.direction,'asc');assert(defaults.sql.includes('::numeric asc NULLS LAST'));
  for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{status:'verified'},{review:'unknown'},{category:'Unknown'},{registration:'other'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
 });
 test('category and registration filters combine; an unregistered profile gets one Farmer ID when completed',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
@@ -26,6 +27,7 @@ test('category and registration filters combine; an unregistered profile gets on
   assert.equal((await listFarmers(c,params({category:'Others',registration:'registered'}))).stats.total,1);
   assert.equal((await c.query('SELECT count(*)::int AS n FROM farmers WHERE id=$1',[lead.id])).rows[0].n,1);
   await createFarmer(c,{full_name:'ISOLATED PHONE OWNER',primary_phone:'0712345678',registered_by:'TEST'});
+  const unassigned=await listFarmers(c,params({category:'unassigned',registration:'registered',q:'ISOLATED PHONE OWNER'}));assert.equal(unassigned.stats.total,1);assert.equal(unassigned.farmers[0].category,null);
   const {rows:[uncertain]}=await c.query("INSERT INTO farmers(customer_id,full_name,registration_date,registration_status,category) VALUES(NULL,'ISOLATED UNCERTAIN',NULL,'review_required','Others') RETURNING id,updated_at::text AS revision");
   const {rows:[issue]}=await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'registration_match','ISOLATED IDENTITY REVIEW') RETURNING id",[uncertain.id]);
   const completion={full_name:'ISOLATED UNCERTAIN',primary_phone:'0712345678',registered_by:'TEST',registration_date:'2026-10-10',registration_status:'registered',category:'Others',revision:uncertain.revision};

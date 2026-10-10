@@ -8,11 +8,11 @@ export function directoryQuery(params){
  const scope=params.get('scope')||'registered',status=params.get('status')||'',review=params.get('review')||'all';
  const category=params.get('category')||'',registration=params.get('registration')||'';
  const sort=params.get('sort')||'customer_id',direction=params.get('direction')||(sort==='created_at'?'desc':'asc');
- if(!['registered','demo','all'].includes(scope)||status&&!statuses.includes(status)||category&&!farmerCategories.includes(category)||registration&&!['registered','not_registered','review_required'].includes(registration)||!['all','open','clear'].includes(review)||!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction))throw new Problem(400,'Invalid directory filter or sort');
+ if(!['registered','demo','all'].includes(scope)||status&&!statuses.includes(status)||category&&!['unassigned',...farmerCategories].includes(category)||registration&&!['registered','not_registered','review_required'].includes(registration)||!['all','open','clear'].includes(review)||!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction))throw new Problem(400,'Invalid directory filter or sort');
  const q=(params.get('q')||'').trim();if(q.length>100)throw new Problem(400,'Search must be at most 100 characters');
  const values=[],conditions=[];const bind=v=>{values.push(v);return '$'+values.length;};
  if(scope!=='all')conditions.push('f.record_kind='+bind(scope));
- if(category)conditions.push('f.category='+bind(category));
+ if(category)conditions.push(category==='unassigned'?'f.category IS NULL':'f.category='+bind(category));
  if(registration)conditions.push('f.registration_status='+bind(registration));
  if(status)conditions.push('f.status='+bind(status)+'::farmer_status');
  for(const field of ['county','location']){const v=params.get(field);if(v){if(v.length>300)throw new Problem(400,'Invalid location filter');conditions.push('lower(f.'+field+')=lower('+bind(v.trim())+')');}}
