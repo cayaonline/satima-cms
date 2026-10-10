@@ -138,10 +138,17 @@ header strong{color:var(--ink);font-weight:600}
 .supplier-categories{margin:0 0 24px}
 .supplier-categories h2{font-family:inherit;font-size:16px;font-weight:600;margin:0 0 14px}
 .category-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.supplier-category{min-width:0;padding:18px 20px;background:#fff;border:1px solid var(--line);border-radius:10px}
+.supplier-category{display:block;min-width:0;padding:18px 20px;background:#fff;border:1px solid var(--line);border-radius:10px;color:inherit;text-decoration:none;cursor:pointer;transition:background-color .15s ease,border-color .15s ease}
+.supplier-category:hover{background:#fafbf8;border-color:#b8c9bc}
+.supplier-category:active{background:#eef2eb}
 .supplier-category span{display:block;color:var(--muted);font-size:12px;line-height:1.5;min-height:3em}
 .supplier-category strong{display:block;color:var(--ink);font:400 30px Georgia,serif;margin-top:8px}
 .category-incomplete{color:var(--muted);font-size:12px;margin:12px 0 0}
+.category-incomplete a{display:inline-block;color:inherit;text-decoration:none;padding:3px 0}
+.category-incomplete a:hover{text-decoration:underline;text-underline-offset:3px}
+.back-directory{display:inline-block;color:var(--green);font-size:12px;text-decoration:none;margin-bottom:12px}
+.back-directory:hover{text-decoration:underline;text-underline-offset:3px}
+.category-total{margin:7px 0 0;color:var(--muted);font-size:12px}
 .table-wrap table{min-width:1150px}
 .table-wrap th:nth-child(3){width:170px}
 .table-wrap th:nth-child(4){width:20%}

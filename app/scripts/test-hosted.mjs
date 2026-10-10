@@ -29,6 +29,9 @@ try{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{let data='';res.on('data',b=>data+=b);res.on('end',()=>resolve(new Response(data,{status:res.statusCode,headers:res.headers})));});
   r.on('error',reject);r.end(options.body);
  });
+ for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization']){
+  const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
+ }
  assert.equal((await request('/api/farmers')).status,401);
  assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
  assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);

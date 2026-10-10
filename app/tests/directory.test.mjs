@@ -36,6 +36,20 @@ test('category and registration filters combine; an unregistered profile gets on
   await assert.rejects(()=>updateFarmer(c,uncertain.id,completion),e=>e.status===409&&e.message.includes('existing registration'));
  }finally{await c.query('ROLLBACK');c.release();}
 });
+test('each supplier category and awaiting-categorization list uses exact stored categories and updates after editing',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
+ const c=await pool.connect();await c.query('BEGIN');try{
+  const categories=['Satima Farmers','Larger Sagana Farmers','Kangema Farmers','Others'];
+  for(const [i,category] of categories.entries())await createFarmer(c,{full_name:'CATEGORY LINK TEST '+i,primary_phone:'CATEGORY-LINK-'+i,registered_by:'TEST',category});
+  const unassigned=await createFarmer(c,{full_name:'CATEGORY LINK TEST UNASSIGNED',primary_phone:'CATEGORY-LINK-UNASSIGNED',registered_by:'TEST'});
+  const query=category=>listFarmers(c,params({scope:'registered',category,q:'CATEGORY LINK TEST'}));
+  for(const category of categories){const result=await query(category);assert.equal(result.stats.total,1,category);assert.equal(result.farmers[0].category,category);}
+  assert.equal((await query('unassigned')).stats.total,1);
+  const {rows:[record]}=await c.query('SELECT updated_at::text AS revision,registration_date::text FROM farmers WHERE id=$1',[unassigned.id]);
+  await updateFarmer(c,unassigned.id,{full_name:'CATEGORY LINK TEST UNASSIGNED',primary_phone:'CATEGORY-LINK-UNASSIGNED',registered_by:'TEST',registration_date:record.registration_date,category:'Others',revision:record.revision});
+  assert.equal((await query('unassigned')).stats.total,0);
+  assert.equal((await query('Others')).stats.total,2);
+ }finally{await c.query('ROLLBACK');c.release();}
+});
 test('pagination traverses more than 200 farmers with accurate filtered counts, ordering and literal search',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
  for(let i=0;i<205;i++)await c.query(`INSERT INTO farmers(full_name,primary_phone,registered_by,record_kind,village_area,county,location,registered_business_name,registration_date,status) VALUES($1,$2,'TEST STAFF','registered','ISOLATED VILLAGE','ISOLATED COUNTY','ISOLATED LOCATION','ISOLATED BUSINESS',$3,$4)`,['ISOLATED PAGINATION '+String(i).padStart(3,'0'),'ISOLATED PHONE '+i,i<100?'2026-01-01':'2026-02-01',i===0?'inactive':'pending_verification']);
