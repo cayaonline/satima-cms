@@ -30,6 +30,7 @@ header strong{color:var(--ink);font-weight:600}
 .operator span{font-weight:400;letter-spacing:0}
 .heading{margin-bottom:24px}
 .heading p{margin-bottom:0}
+.heading .admin-panel-label{color:var(--muted);font-size:12px;font-weight:600;line-height:1.4;margin:0 0 6px}
 .heading .primary{flex-shrink:0}
 .stats{margin-top:0}
 .stat{min-width:0}
