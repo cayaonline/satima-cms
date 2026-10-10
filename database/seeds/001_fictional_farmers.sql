@@ -8,10 +8,10 @@ BEGIN
   fid := ('00000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid;
   IF EXISTS (SELECT 1 FROM farmers WHERE id=fid) THEN CONTINUE; END IF;
   INSERT INTO farmers(id, full_name, registered_business_name, national_id, primary_phone,
-   physical_address, village_area, sub_location, location, sub_county, county, kra_pin, registered_by)
+   physical_address, village_area, sub_location, location, sub_county, county, kra_pin, registered_by, record_kind)
   VALUES(fid, 'Fictional Farmer '||n, 'TEST ONLY Farm '||n, 'TEST-ID-'||n, 'TEST-PHONE-'||n,
    'Fictional address', 'Test Village', 'Test Sub-location', 'Test Location', 'Test Sub-county',
-   'Test County', 'TEST-PIN-'||n, 'TEST STAFF');
+   'Test County', 'TEST-PIN-'||n, 'TEST STAFF', 'demo');
   INSERT INTO farmer_contacts(farmer_id, full_name, phone_number, relationship, is_primary_alternative)
    VALUES(fid, 'Fictional Next of Kin '||n, 'TEST-KIN-PHONE-'||n, 'Test relationship', true);
   INSERT INTO farmer_payment_profiles(farmer_id, mpesa_registered_name, mpesa_phone_number)

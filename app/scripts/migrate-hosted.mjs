@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 const admin=process.env.ADMIN_DATABASE_URL,password=process.env.APP_DB_PASSWORD;
 if(!admin||!password||password.length<24)throw new Error('Hosted database credentials are required.');
 if(new URL(admin).pathname!=='/satima_cms')throw new Error('Expected the satima_cms database.');
-const c=new pg.Client({connectionString:admin,connectionTimeoutMillis:15000});
+const c=new pg.Client({connectionString:admin,connectionTimeoutMillis:15000,options:'-c lock_timeout=5000 -c statement_timeout=60000'});
 try {
  await c.connect();
  await c.query('SELECT pg_advisory_lock(728410022)');

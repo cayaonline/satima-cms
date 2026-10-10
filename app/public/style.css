@@ -132,3 +132,5 @@ header strong{color:var(--ink);font-weight:600}
 }
 @media(max-width:380px){.content{padding-inline:12px}.stat{padding:14px 9px}.stat-top{font-size:10px}.stat strong{font-size:27px}.dialog-head .detail-actions{flex-basis:100%;justify-content:flex-end}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
+
+.page-actions{display:flex;align-items:center;justify-content:flex-end;gap:16px;flex-wrap:wrap}.page-actions button:disabled{cursor:default}.page-actions span{white-space:nowrap}

@@ -1,18 +1,21 @@
+import {SessionStore,LoginLimiter} from './security.mjs';
+import {listFarmers} from './directory.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
-import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
+import {createHash,timingSafeEqual} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
 if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<16)throw new Error('CMS_PASSWORD must be at least 16 characters.');
-const sessions=new Map(),attempts=new Map(),ttl=8*3600*1000;
+const ttl=8*3600*1000,sessions=new SessionStore({ttl}),attempts=new LoginLimiter();
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css']};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
 async function body(req){let data='';for await(const b of req){data+=b;if(data.length>40000)throw new Problem(413,'Request too large.');}try{const value=JSON.parse(data);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new Problem(400,'Invalid JSON.');}}
-function session(req){const token=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('satima_session='))?.slice(15);const exp=sessions.get(token);return exp>Date.now()?token:null;}
-setInterval(()=>{for(const[k,v]of sessions)if(v<Date.now())sessions.delete(k);for(const[k,v]of attempts)if(v.until<Date.now())attempts.delete(k);},60000).unref();
+function cookieToken(req){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('satima_session='))?.slice(15);}
+function session(req){const token=cookieToken(req);return sessions.valid(token)?token:null;}
+setInterval(()=>{sessions.prune();attempts.prune();},60000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -24,32 +27,17 @@ const server=http.createServer(async(req,res)=>{
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
  if(files[path]&&req.method==='GET'){const [f,mime]=files[path];res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/login'&&req.method==='POST'){
- const key=req.socket.remoteAddress;let a=attempts.get(key);if(!a||a.until<Date.now())a={count:0,until:Date.now()+900000};
- if(a.count>=10)throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
- const b=await body(req);a.count++;attempts.set(key,a);
+ const key=req.socket.remoteAddress;
+ if(!attempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
+ const b=await body(req);
  if(typeof b.password!=='string'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect password.');
- attempts.delete(key);const token=randomBytes(32).toString('hex');sessions.set(token,Date.now()+ttl);
+ attempts.clear(key);const token=sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
  }
  const token=session(req);if(!token)throw new Problem(401,'Sign in to continue.');
- if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Local operator'});
- if(path==='/api/logout'&&req.method==='POST'){sessions.delete(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
- if(path==='/api/farmers'&&req.method==='GET'){
- const q=(url.searchParams.get('q')||'').slice(0,100),scope=url.searchParams.get('scope')||'registered';
- const where=`($1='' OR concat_ws(' ',f.full_name,f.customer_id,f.primary_phone,f.registered_business_name,
- f.village_area,f.county,f.location,f.sub_location,f.sub_county,f.physical_address,
- f.status::text,replace(f.status::text,'_',' '),f.registration_date::text,
- CASE WHEN EXISTS(SELECT FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open')
- THEN (SELECT count(*)::text||' open' FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open')
- ELSE 'No open notes' END) ILIKE '%'||$1||'%') AND ($2='all' OR ($2='registered' AND f.registered_by<>'TEST STAFF') OR ($2='demo' AND f.registered_by='TEST STAFF'))`;
- const data=await pool.query(`SELECT f.id,f.customer_id,f.full_name,f.primary_phone,f.county,f.village_area,f.status,f.registration_date::text,
- (SELECT count(*)::int FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open') AS open_issues
- FROM farmers f WHERE ${where} ORDER BY f.created_at DESC,f.id LIMIT 200`,[q,scope]);
- const {rows:[stats]}=await pool.query(`SELECT count(*)::int AS total,count(*) FILTER(WHERE f.status='pending_verification')::int AS pending,
- count(*) FILTER(WHERE EXISTS(SELECT FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open'))::int AS needs_review
- FROM farmers f WHERE ${where}`,[q,scope]);
- return send(res,200,{farmers:data.rows,stats});
- }
+ if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Operations team'});
+ if(path==='/api/logout'&&req.method==='POST'){sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
+ if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
  if(path==='/api/farmers'&&req.method==='POST'){const b=await body(req);const f=await transaction(c=>createFarmer(c,b));return send(res,201,{id:f.id,customer_id:f.customer_id});}
  const m=path.match(/^\/api\/farmers\/([^/]+)(?:\/(issues))?$/);
  if(m){if(!uuid.test(m[1]))throw new Problem(400,'Invalid farmer identifier.');
@@ -70,11 +58,13 @@ const server=http.createServer(async(req,res)=>{
  }catch(e){
  let status=e.status||500,message=e.status?e.message:'The request could not be completed. Try again.';
  if(e.code==='23505'){status=409;message='That National ID or KRA PIN is already registered. Check for a duplicate farmer.';}
- if(['23514','23502','22007','22008','22P02'].includes(e.code)){status=400;message='One or more fields are invalid. Check your entries.';}
+ if(e.constraint==='active_farmer_evidence'){status=400;message='Active status requires complete, current identity checks, consent and verified payment details, with no high-priority open notes.';}
+ if(e.constraint!=='active_farmer_evidence'&&['23514','23502','22007','22008','22P02'].includes(e.code)){status=400;message='One or more fields are invalid. Check your entries.';}
  if(e.code==='23503'){status=400;message='Related farmer record not found.';}
  if(status===500)console.error('Request failed',e.code||e.name); // No queries, values or secrets.
  send(res,status,{error:message});
  }
 });
+server.requestTimeout=15000;server.headersTimeout=10000;server.keepAliveTimeout=5000;server.maxHeadersCount=100;
 server.listen(port,process.env.LISTEN_HOST||'127.0.0.1',()=>console.log(`Satima CMS listening on container port ${port}`));
 process.on('SIGTERM',()=>server.close(()=>pool.end().then(()=>process.exit(0))));

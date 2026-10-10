@@ -76,7 +76,7 @@ async function evidence(c,id,input){
  for(const field of extra)data[field]=field.endsWith('_at')||field==='consent_date'?timestamp(a[field],prettyField(field)):text(a[field],prettyField(field),['verified_by','consent_version'].includes(field),field==='notes'?2000:300);
  if(key==='consent'&&data.signature_method&&!['signature','thumbprint','digital'].includes(data.signature_method))throw new Problem(400,'Invalid signature method.');
  const names=[...checks,...extra];
- const changed=!old||names.some(k=>(old[k] instanceof Date?old[k].toISOString():old[k])!==data[k]);
+ const changed=!old||(key==='verification'&&!old.verified_details)||names.some(k=>(old[k] instanceof Date?old[k].toISOString():old[k])!==data[k]);
  if(changed){
  if(key==='consent'&&old?.withdrawn_at){names.push('withdrawn_at');data.withdrawn_at=old.withdrawn_at;}
  await c.query(`INSERT INTO ${table}(farmer_id,${names.join(',')},created_at) VALUES(${[id,...names].map((_,i)=>'$'+(i+1)).join(',')},clock_timestamp())`,[id,...names.map(k=>data[k])]);
