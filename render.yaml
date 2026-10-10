@@ -1,13 +1,12 @@
-# Paid resources: review Render's cost estimate before deploying.
+# Free web hosting; PostgreSQL is hosted separately on Neon's Free plan.
 services:
   - type: web
     name: satima-cms
     runtime: node
     region: frankfurt
-    plan: 0.5c-512mb
+    plan: free
     numInstances: 1
     buildCommand: npm ci --prefix app --omit=dev --ignore-scripts
-    preDeployCommand: node app/scripts/migrate-hosted.mjs
     startCommand: node app/scripts/start-hosted.mjs
     healthCheckPath: /health
     autoDeployTrigger: "off"
@@ -16,19 +15,5 @@ services:
         value: 24.21.0
       - key: CMS_PASSWORD
         generateValue: true
-      - key: APP_DB_PASSWORD
-        generateValue: true
-      - key: ADMIN_DATABASE_URL
-        fromDatabase:
-          name: satima-postgres
-          property: connectionString
-
-databases:
-  - name: satima-postgres
-    databaseName: satima_cms
-    user: satima_admin
-    region: frankfurt
-    plan: 0.1c-256mb
-    diskSizeGB: 1
-    postgresMajorVersion: "18"
-    ipAllowList: []
+      - key: DATABASE_URL
+        sync: false

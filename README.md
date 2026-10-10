@@ -22,7 +22,7 @@ See [installation and private database transfer](docs/other-computers.md). Run `
 
 ## Shared online deployment
 
-[Deploy on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms) using the prepared [hosting and private data-transfer guide](docs/render-deployment.md). This creates paid hosting resources after your approval. A new deployment is empty until the private database is transferred. The eventual Render HTTPS service URL is the shared application link.
+[Deploy on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms) using the prepared [hosting and private data-transfer guide](docs/render-deployment.md). This uses a free Render web service and a separate Neon Free PostgreSQL database. A new deployment is empty until the private database is transferred. The eventual Render HTTPS service URL is the shared application link.
 
 ## Requirements and first start
 

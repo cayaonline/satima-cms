@@ -1,46 +1,40 @@
-# Shared online CMS on Render
+# Shared online CMS: Render Free + Neon Free
 
-This deployment runs the existing interface and database schema on one Node web service and one persistent PostgreSQL 18 database. No farmer records, PDFs, local passwords or backups are in GitHub. A new deployment initially has an empty directory.
+The existing CMS runs on one free Render Node web service. Its persistent PostgreSQL database is hosted separately on Neon Free. The interface, schema and registration behavior are preserved. GitHub contains code only; farmer records, PDFs, backups and credentials remain private.
 
-[Prepare this repository on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms)
+## Setup
 
-## First deployment
+1. Sign in to Neon with GitHub and create a **Free** PostgreSQL 18 project in Frankfurt. Create the database named `satima_cms`. Do not enable optional authentication, Data API or paid features.
+2. Back up the existing Mac database with `make backup`. Transfer it only after the owner approves storing farmer identity, contact, next-of-kin, M-Pesa and verification information in their Neon project.
+3. Restore the private dump into the new, unused Neon database with PostgreSQL 18 `pg_restore --no-owner --no-acl --single-transaction`. Use a direct connection, not a pooler, and TLS with certificate verification. Keep credentials in private environment variables or a mode-600 password file. Never put credentials in shell arguments or Git. Confirm the destination is empty before restoring.
+4. Run `node app/scripts/migrate-hosted.mjs` locally with private `ADMIN_DATABASE_URL` and a freshly generated `APP_DB_PASSWORD`. This verifies the restored migration hashes and configures `satima_app` with existing grants. The app cannot delete farmers or alter audit history.
+5. Deploy `cayaonline/satima-cms` as a **Free** Render web service, either manually or using `render.yaml`. Build command: `npm ci --prefix app --omit=dev --ignore-scripts`. Start command: `node app/scripts/start-hosted.mjs`. Health check: `/health`. Choose Frankfurt and disable automatic deploys.
+6. Configure only `CMS_PASSWORD`, `NODE_VERSION=24.21.0` and `DATABASE_URL` on Render. The database URL must use the restricted `satima_app` role, database `satima_cms`, and `sslmode=verify-full`. Use Neon's direct endpoint. Keep the schema-owner connection on the Mac; Render does not need it. `CMS_PASSWORD` is a new cloud login password, different from the Mac's password.
+7. Wait for Render to report **Live**. Its displayed HTTPS URL is the link to share with trusted operators. Verify login, 22 actual registrations plus 5 separate demo records, customer-ID uniqueness, searching and authorized edits.
 
-1. Sign in to Render with GitHub. Authorize Render and install its GitHub app for **only `cayaonline/satima-cms`** when repository access is requested. The repository stays private.
-2. Open the deployment link above. Review the two resources in `render.yaml`: one `0.5c-512mb` web service and one `0.1c-256mb` PostgreSQL database with 1 GB storage, both in Frankfurt. These are paid resources. Review Render's displayed recurring cost before confirming creation. No hosting has been purchased by preparing these files.
-3. Approve creation only after reviewing the cost. The pre-deploy command applies the existing migrations, checks their hashes, and configures the restricted `satima_app` database login. No seeds run automatically.
-4. Wait for the web service to report **Live**. Open the HTTPS URL shown on that service (Render assigns the actual hostname). This URL is the link to share with trusted operators.
-5. In the web service's **Environment** page, reveal/copy `CMS_PASSWORD` and use it to sign in. Render generates this password; the Mac's local password is not the cloud password. Send it privately to trusted operators.
-6. Verify `/health`, sign-in, and farmer registration before migrating real records. Follow the transfer checklist below before switching daily work to the shared online copy.
+No seed data runs automatically. A fresh deployment without a private restore has an empty directory. Existing Mac and hosted databases do not synchronize: use the shared service for ongoing work after cutover and retain the Mac database as a backup copy. Back up original PDFs separately.
 
-The blueprint disables automatic deploys. Deploy future reviewed commits from Render's Manual Deploy control. Keep one web instance: sessions are stored in memory and expire after eight hours or restart. A redeploy signs operators out. All operators still share the same password and audit actor; this update does not introduce individual staff accounts.
+## Free-plan behavior
 
-## Move the existing database privately
+Render sleeps after 15 minutes without traffic; the next visit can take about a minute to wake it. Sessions are stored in memory and expire after eight hours or restart, so waking/redeploying can require signing in again. Keep a single web instance. All operators still share the same login and audit actor.
 
-This is a separate, one-time cutover. Do not upload a database dump to GitHub or paste its contents into logs. Arrange the transfer only after the account owner approves storing the farmer registrations (including identity, contact, next-of-kin and M-Pesa information) in their Render database in Frankfurt.
+Neon Free has storage and compute quotas. Its database compute can sleep independently; data persists outside the web container. Keep periodic private backups. Check current dashboard quotas before growing the service. This is free-tier hosting without a production uptime guarantee.
 
-- Stop edits during transfer and run `make backup` on the Mac. Keep the original local database and the new private backup.
-- Confirm the cloud database is a new, unused deployment. If it already contains new records, stop and reconcile them before restoring; do not overwrite them.
-- For a supervised restore from the Mac, temporarily allow only the Mac's current public IP `/32` in the Render database's external access settings. Use the external database credentials and TLS with certificate verification. Do not open it to `0.0.0.0/0`.
-- Using PostgreSQL 18 `pg_restore`, restore the private full dump into the unused cloud `satima_cms` database with `--clean --if-exists --no-owner --no-acl --single-transaction`. Supply the connection through private environment variables or a mode-600 password file, never command arguments or Git. This replaces the empty schema with the local schema, records, audit history and sequence state.
-- Manually redeploy the web service. The pre-deploy script verifies the restored migration ledger, reapplies app grants and configures its cloud password. All web queries use `satima_app`, not the schema owner.
-- Restore the database external IP list to empty. Web and database communicate over Render's internal connection.
-- Verify 22 actual registrations and 5 separate demo records, customer-ID uniqueness, all related tables and audit counts against the local copy. Test search and one authorized edit before releasing the service to operators.
-- Use the shared HTTPS URL for subsequent work. The Mac database remains a backup copy and will not synchronize automatically. Back up source PDFs separately; they are not stored in PostgreSQL.
+The blueprint creates no Render database and uses no paid compute. No payment card is configured. Render can request card verification for some accounts; stop if this occurs rather than switching to a paid plan.
 
-## Configuration and verification
+## Security and maintenance
 
-`RENDER_EXTERNAL_URL` supplies the accepted HTTPS origin automatically. A custom domain requires `PUBLIC_ORIGIN=https://your-domain.example` and a redeploy. Hosted cookies include Secure, HttpOnly and SameSite=Strict. Data routes reject unexpected hosts; writes reject missing or foreign origins. `/health` returns only database health and accepts internal health probes. Database external connections are disabled by default.
+`RENDER_EXTERNAL_URL` supplies the accepted HTTPS origin. For a custom domain, set `PUBLIC_ORIGIN=https://your-domain.example` and redeploy. Hosted cookies include Secure, HttpOnly and SameSite=Strict; data routes reject unexpected hosts and writes reject missing or foreign origins. `/health` returns only database health for internal probes.
 
-`ADMIN_DATABASE_URL` is used by migrations; startup derives a separate connection for `satima_app` and removes the admin URL from the running Node environment. Render workspace administrators can still access deployment secrets. Never share dashboard access with ordinary CMS operators.
+Future migrations run locally using the Neon schema owner before manually deploying reviewed code. Do not add owner credentials to the web service. Do not expose the PostgreSQL password to frontend JavaScript. Dashboard access is for administrators; ordinary operators receive only the CMS URL and shared password.
 
-Local verification:
+## Verification
 
 ```sh
 make app-test
 node app/scripts/test-hosted.mjs
 ```
 
-The hosted test creates and removes its own disposable Docker PostgreSQL instance. It tests migrations as a non-superuser owner, repeat migration safety, login, HTTPS origin checks, Secure cookies, registration, edit, search, SQL persistence and denied destructive operations. It does not connect to the existing local CMS database. It simulates Render's proxy-facing HTTP requests; actual public TLS and Render account provisioning are verified after deployment.
+The hosted test creates and removes a disposable Docker PostgreSQL instance. It tests migrations as a non-superuser owner, repeat migration safety, restricted-only startup, HTTPS origin checks, Secure cookies, login, registration, editing, search, persistence and denied destructive operations. It never connects to the existing CMS database. Actual TLS and the deployed URL are checked after provisioning.
 
-References: [Render Blueprints](https://render.com/docs/blueprint-spec), [Deploy to Render](https://render.com/docs/deploy-to-render), [pricing](https://render.com/pricing), [PostgreSQL connections](https://render.com/docs/postgresql-creating-connecting).
+References: [Render Free](https://render.com/docs/free), [Render web services](https://render.com/docs/web-services), [Neon](https://neon.com/faster).
