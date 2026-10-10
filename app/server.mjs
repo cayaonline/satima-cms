@@ -36,7 +36,12 @@ const server=http.createServer(async(req,res)=>{
  if(path==='/api/logout'&&req.method==='POST'){sessions.delete(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
  if(path==='/api/farmers'&&req.method==='GET'){
  const q=(url.searchParams.get('q')||'').slice(0,100),scope=url.searchParams.get('scope')||'registered';
- const where=`($1='' OR f.full_name ILIKE '%'||$1||'%' OR f.customer_id ILIKE '%'||$1||'%' OR f.primary_phone ILIKE '%'||$1||'%') AND ($2='all' OR ($2='registered' AND f.registered_by<>'TEST STAFF') OR ($2='demo' AND f.registered_by='TEST STAFF'))`;
+ const where=`($1='' OR concat_ws(' ',f.full_name,f.customer_id,f.primary_phone,f.registered_business_name,
+ f.village_area,f.county,f.location,f.sub_location,f.sub_county,f.physical_address,
+ f.status::text,replace(f.status::text,'_',' '),f.registration_date::text,
+ CASE WHEN EXISTS(SELECT FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open')
+ THEN (SELECT count(*)::text||' open' FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open')
+ ELSE 'No open notes' END) ILIKE '%'||$1||'%') AND ($2='all' OR ($2='registered' AND f.registered_by<>'TEST STAFF') OR ($2='demo' AND f.registered_by='TEST STAFF'))`;
  const data=await pool.query(`SELECT f.id,f.customer_id,f.full_name,f.primary_phone,f.county,f.village_area,f.status,f.registration_date::text,
  (SELECT count(*)::int FROM farmer_data_issues i WHERE i.farmer_id=f.id AND i.status='open') AS open_issues
  FROM farmers f WHERE ${where} ORDER BY f.created_at DESC,f.id LIMIT 200`,[q,scope]);
