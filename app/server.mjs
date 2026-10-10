@@ -1,5 +1,6 @@
-import {SessionStore,LoginLimiter} from './security.mjs';
+import {SessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
+import {listOperationsFarmers,operationsFarmerDetail} from './operations-directory.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -7,16 +8,22 @@ import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
 if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<16)throw new Error('CMS_PASSWORD must be at least 16 characters.');
 const ttl=8*3600*1000,sessions=new SessionStore({ttl}),attempts=new LoginLimiter();
+const viewerSessions=new SessionStore({ttl}),viewerAttempts=new LoginLimiter();
+const viewerUsername=process.env.VIEWER_USERNAME,viewerPasswordHash=process.env.VIEWER_PASSWORD_HASH;
+if((viewerUsername||viewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(viewerUsername||'')||!validViewerHash(viewerPasswordHash)))throw new Error('Viewer credentials must be configured together with a valid scrypt hash.');
+const viewerEnabled=!!(viewerUsername&&viewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/customers','/distributors']);
+const operationsPages=new Set(['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
 async function body(req){let data='';for await(const b of req){data+=b;if(data.length>40000)throw new Problem(413,'Request too large.');}try{const value=JSON.parse(data);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new Problem(400,'Invalid JSON.');}}
-function cookieToken(req){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('satima_session='))?.slice(15);}
-function session(req){const token=cookieToken(req);return sessions.valid(token)?token:null;}
-setInterval(()=>{sessions.prune();attempts.prune();},60000).unref();
+function cookieToken(req,name='satima_session'){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1);}
+function session(req){const token=cookieToken(req);return sessions.role(token)==='administrator'?token:null;}
+function viewerSession(req){const token=cookieToken(req,'satima_viewer_session');return viewerSessions.role(token)==='viewer'?token:null;}
+setInterval(()=>{sessions.prune();viewerSessions.prune();attempts.prune();viewerAttempts.prune();},60000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -26,8 +33,21 @@ const server=http.createServer(async(req,res)=>{
  if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
- const asset=files[path]||(directoryPages.has(path)?files['/']:null);
+ const asset=files[path]||(directoryPages.has(path)?files['/']:null)||(operationsPages.has(path)?['operations.html','text/html']:null);
  if(asset&&req.method==='GET'){const [f,mime]=asset;res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
+ if(path==='/api/operations/login'&&req.method==='POST'){
+  if(!viewerEnabled)throw new Problem(503,'Operations access is not configured.');
+  const key=req.socket.remoteAddress;
+  if(!viewerAttempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
+  const credentials=await body(req);
+  const validPassword=await verifyViewerPassword(credentials.password,viewerPasswordHash);
+  if(credentials.username!==viewerUsername||!validPassword)throw new Problem(401,'Incorrect username or password.');
+  viewerAttempts.clear(key);
+  const token=viewerSessions.issue(cookieToken(req,'satima_viewer_session'),'viewer');
+  if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
+  res.setHeader('Set-Cookie',`satima_viewer_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);
+  return send(res,200,{ok:true});
+ }
  if(path==='/api/login'&&req.method==='POST'){
  const key=req.socket.remoteAddress;
  if(!attempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
@@ -35,6 +55,19 @@ const server=http.createServer(async(req,res)=>{
  if(typeof b.password!=='string'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect password.');
  attempts.clear(key);const token=sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
+ }
+ if(path.startsWith('/api/operations/')){
+  const token=viewerSession(req);
+  if(!token)throw new Problem(401,'Sign in to the Operations Portal.');
+  if(path==='/api/operations/session'&&req.method==='GET')return send(res,200,{role:'viewer'});
+  if(path==='/api/operations/logout'&&req.method==='POST'){
+   viewerSessions.revoke(token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
+  }
+  if(req.method!=='GET')throw new Problem(403,'Operations access is read-only.');
+  if(path==='/api/operations/farmers')return send(res,200,await listOperationsFarmers(pool,url.searchParams));
+  const viewerFarmer=path.match(/^\/api\/operations\/farmers\/([^/]+)$/);
+  if(viewerFarmer){if(!uuid.test(viewerFarmer[1]))throw new Problem(400,'Invalid farmer identifier.');return send(res,200,await operationsFarmerDetail(pool,viewerFarmer[1]));}
+  throw new Problem(404,'Not found.');
  }
  const token=session(req);if(!token)throw new Problem(401,'Sign in to continue.');
  if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Operations team'});

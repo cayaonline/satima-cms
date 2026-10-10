@@ -24,6 +24,8 @@ See [installation and private database transfer](docs/other-computers.md). Run `
 
 [Deploy on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms) using the prepared [hosting and private data-transfer guide](docs/render-deployment.md). This uses a free Render web service and a separate Neon Free PostgreSQL database. A new deployment is empty until the private database is transferred. The eventual Render HTTPS service URL is the shared application link.
 
+The administrator CMS remains at `/`. The separate read-only [Morning Dew Operations Portal](https://satima-cms.onrender.com/operations/login) signs in at `/operations/login` and displays approved farmer information at `/operations`; it shares the same PostgreSQL database but uses a distinct viewer credential and restricted API responses. Configure the viewer credential outside Git as described in [production maintenance](docs/production-maintenance.md).
+
 ## Requirements and first start
 
 Docker Desktop (running), Git, Python 3, Make and a terminal. Local development tests additionally use Node.js and `npm ci --prefix app`; the running app needs no host Node installation. PostgreSQL client tools run inside the container; host PostgreSQL and MySQL are not used or modified.

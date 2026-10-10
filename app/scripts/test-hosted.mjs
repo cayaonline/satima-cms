@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import http from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
+import {hashViewerPassword} from '../security.mjs';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
 const name='satima-hosting-test-'+randomBytes(4).toString('hex');
-const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(24).toString('hex');
+const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(24).toString('hex'),viewerSecret=randomBytes(32).toString('hex');
 let server,localServer,db;
 function run(args,options={}){const r=spawnSync(docker,args,{encoding:'utf8',...options});if(r.status!==0)throw new Error('Docker test command failed');return r.stdout.trim();}
 function migration(env){const r=spawnSync(process.execPath,['app/scripts/migrate-hosted.mjs'],{env,encoding:'utf8'});assert.equal(r.status,0,r.stdout+r.stderr);}
@@ -19,7 +20,7 @@ try{
  // Exercise migrations as an ordinary database owner with CREATEROLE, not superuser.
  await db.query('CREATE ROLE satima_admin LOGIN CREATEROLE PASSWORD '+pg.escapeLiteral(secret));
  await db.query('CREATE DATABASE satima_cms OWNER satima_admin');
- const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
+ const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations-viewer',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
  migration(env);migration(env);
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
@@ -30,17 +31,20 @@ try{
   r.on('error',reject);r.end(options.body);
  });
  for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization']){
-  const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
+const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- assert.equal((await request('/api/farmers')).status,401);
- assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
- assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);
- const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({password:cmsSecret})});
- assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
+ for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']){
+const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
+ }
+assert.equal((await request('/api/farmers')).status,401);
+assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
+assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);
+const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({password:cmsSecret})});
+assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
- const created=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'HOSTED TEST ONLY',primary_phone:'TEST-PHONE-SEARCH',registered_by:'TEST',village_area:'TEST VILLAGE',county:'TEST COUNTY',location:'TEST LOCATION',sub_location:'TEST SUBLOCATION',sub_county:'TEST SUBCOUNTY',physical_address:'TEST ADDRESS'})});
- assert.equal(created.status,201);const farmer=await created.json();
- let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
+const created=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'HOSTED TEST ONLY',primary_phone:'TEST-PHONE-SEARCH',registered_by:'TEST',village_area:'TEST VILLAGE',county:'TEST COUNTY',location:'TEST LOCATION',sub_location:'TEST SUBLOCATION',sub_county:'TEST SUBCOUNTY',physical_address:'TEST ADDRESS',national_id:'PRIVATE-NATIONAL-ID',kra_pin:'PRIVATE-KRA-PIN',category:'Satima Farmers',contact:{full_name:'PRIVATE NEXT OF KIN',phone_number:'PRIVATE KIN PHONE',relationship:'TEST'},payment:{mpesa_registered_name:'PRIVATE MPESA NAME',mpesa_phone_number:'PRIVATE MPESA PHONE'}})});
+assert.equal(created.status,201);const farmer=await created.json();
+let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/farmers/'+farmer.id,{method:'PUT',headers,body:JSON.stringify({...detail,full_name:'HOSTED UPDATED'})})).status,200);
  const results=await (await request('/api/farmers?q=HOSTED%20UPDATED',{headers})).json();assert.equal(results.stats.total,1);
  detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
@@ -52,6 +56,29 @@ try{
  }
  const note=await request('/api/farmers/'+farmer.id+'/issues',{method:'POST',headers,body:JSON.stringify({field_name:'location',description:'TEST REVIEW ONLY'})});assert.equal(note.status,201);
  const reviewed=await (await request('/api/farmers?q=1%20open',{headers})).json();assert.equal(reviewed.stats.total,1);assert.equal(reviewed.farmers[0].open_issues,1);
+ assert.equal((await request('/api/operations/farmers')).status,401);
+ assert.equal((await request('/api/operations/farmers',{headers})).status,401,'Administrator cookie is not a viewer session');
+ assert.equal((await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'wrong',password:viewerSecret})})).status,401);
+ const viewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations-viewer',password:viewerSecret})});
+ assert.equal(viewerLogin.status,200);assert.match(viewerLogin.headers.get('set-cookie'),/HttpOnly.*SameSite=Strict.*Secure/);
+ const viewerHeaders={Origin:'https://satima.example',Cookie:viewerLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+ assert.equal((await request('/api/operations/session',{headers:viewerHeaders})).status,200);
+ assert.equal((await request('/api/session',{headers:viewerHeaders})).status,401);
+ const viewerList=await (await request('/api/operations/farmers',{headers:viewerHeaders})).json();
+ assert.equal(viewerList.stats.total,1);assert.equal(viewerList.farmers[0].customer_id,farmer.customer_id);
+ assert.deepEqual(Object.keys(viewerList.farmers[0]).sort(),['category','county','customer_id','full_name','id','location','primary_phone','registration_date','registration_status','village_area'].sort());
+ const viewerDetail=await (await request('/api/operations/farmers/'+farmer.id,{headers:viewerHeaders})).json();
+ for(const marker of ['PRIVATE-NATIONAL-ID','PRIVATE-KRA-PIN','PRIVATE NEXT OF KIN','PRIVATE KIN PHONE','PRIVATE MPESA NAME','PRIVATE MPESA PHONE','TEST ADDRESS','TEST REVIEW ONLY','audit','payments','consents','verifications','raw_transcription'])assert(!JSON.stringify(viewerDetail).includes(marker),'Viewer leaked '+marker);
+ for(const query of ['HOSTED UPDATED',farmer.customer_id,'TEST-PHONE-SEARCH','TEST VILLAGE','TEST COUNTY','TEST LOCATION'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,1,'Viewer search: '+query);
+ for(const query of ['PRIVATE-NATIONAL-ID','PRIVATE-KRA-PIN','TEST ADDRESS','pending_verification','TEST REVIEW ONLY'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,0,'Viewer restricted search: '+query);
+ const categoryList=await (await request('/api/operations/farmers?category=Satima%20Farmers&page_size=1&sort=full_name',{headers:viewerHeaders})).json();assert.equal(categoryList.stats.total,1);assert.equal(categoryList.pagination.page_size,1);
+ assert.equal((await request('/api/operations/farmers?category=unassigned',{headers:viewerHeaders})).status,400);
+ for(const [route,method] of [['/api/farmers','POST'],['/api/farmers/'+farmer.id,'PUT'],['/api/farmers/'+farmer.id+'/issues','POST'],['/api/operations/farmers','POST'],['/api/operations/farmers/'+farmer.id,'PUT'],['/api/operations/farmers/'+farmer.id,'DELETE'],['/api/operations/farmers/'+farmer.id,'PATCH']]){
+  const response=await request(route,{method,headers:viewerHeaders});assert([401,403].includes(response.status),method+' '+route);
+ }
+ assert.equal((await request('/api/farmers',{headers})).status,200,'Viewer activity must not revoke administrator session');
+ assert.equal((await request('/api/operations/logout',{method:'POST',headers:viewerHeaders,body:'{}'})).status,200);
+ assert.equal((await request('/api/operations/farmers',{headers:viewerHeaders})).status,401);
  assert.equal((await (await request('/api/farmers?q=no-matching-column-value',{headers})).json()).stats.total,0);
  assert.equal((await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).status,400);
  const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({password:cmsSecret})});assert.equal(rotated.status,200);

@@ -173,6 +173,8 @@ main{margin-left:0}
 .stakeholder-directory .empty h2{font-family:Georgia,serif;font-size:22px;color:var(--ink);margin:6px 0 8px}
 .stakeholder-directory .empty p{margin:0}
 .empty-icon{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:19px}
+#login-form label+label{margin-top:16px}
+.source-list{margin:0;padding-left:20px;color:var(--muted);font-size:12px;line-height:1.7}
 @media(max-width:740px){
  aside{padding:16px;gap:8px 12px;flex-wrap:wrap}
  aside .wordmark{order:1;flex:1 1 auto;margin:0;font-size:20px}
