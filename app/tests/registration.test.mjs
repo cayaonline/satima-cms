@@ -38,6 +38,11 @@ test('registration, payment history, optimistic locking, audit and role protecti
 test('HTTP requires login and same-origin writes; sessions, search and profile evidence work',async()=>{
  const base='http://127.0.0.1:'+process.env.CMS_PORT;
  assert.equal((await fetch(base+'/health')).status,200);
+ for(const path of ['/customers','/distributors']){
+  const page=await fetch(base+path);
+  assert.equal(page.status,200);
+  assert.match(await page.text(),/id="stakeholder-content"/);
+ }
  assert.equal((await fetch(base+'/api/farmers')).status,401);
  assert.equal((await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,403);
  const login=await fetch(base+'/api/login',{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify({password:process.env.CMS_PASSWORD})});

@@ -2,6 +2,18 @@ const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>
 let current=null,editing=null,tab='farmers',issueMode=null,listRequest=0,page=1;
 const categoryRoutes={'Satima Farmers':'/farmers/category/satima','Larger Sagana Farmers':'/farmers/category/larger-sagana','Kangema Farmers':'/farmers/category/kangema','Others':'/farmers/category/others'};
 const routeCategory=Object.entries(categoryRoutes).find(([,path])=>path===location.pathname)?.[0]||(location.pathname==='/farmers/awaiting-categorization'?'unassigned':null);
+const stakeholderPages={
+ '/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
+ '/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
+};
+const stakeholderRoute=stakeholderPages[location.pathname];
+if(stakeholderRoute){
+ document.title=stakeholderRoute.title+' · Satima Farmhouse';
+ $('#farmer-content').hidden=true;$('#stakeholder-content').hidden=false;
+ $('#breadcrumb').textContent=stakeholderRoute.name;
+ for(const [id,value] of [['stakeholder-label',stakeholderRoute.label],['stakeholder-title',stakeholderRoute.title],['stakeholder-description',stakeholderRoute.description],['stakeholder-empty-title',stakeholderRoute.empty],['stakeholder-empty-description',stakeholderRoute.emptyDescription]])$('#'+id).textContent=value;
+ document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===stakeholderRoute.name.toLowerCase();link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
+}
 if(routeCategory){
  const title=routeCategory==='unassigned'?'Awaiting Categorization':routeCategory;
  document.title=title+' · Satima Farmhouse';
@@ -17,7 +29,7 @@ const yes=v=>v===true?'Yes':v===false?'No':'Not recorded';
 function toast(s){$('#toast').textContent=s;$('#toast').hidden=false;setTimeout(()=>$('#toast').hidden=true,3500);}
 async function api(path,options={}){const res=await fetch('/api'+path,{...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await res.json();if(!res.ok){if(res.status===401&&path!='/login')showLogin();throw new Error(data.error||'Request failed.');}return data;}
 function showLogin(){document.querySelectorAll('dialog[open]').forEach(d=>d.close());$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{await api('/session');$('#login').hidden=true;$('#workspace').hidden=false;await load();}catch{showLogin();}}
+async function start(){try{await api('/session');$('#login').hidden=true;$('#workspace').hidden=false;if(!stakeholderRoute)await load();}catch{showLogin();}}
 $('#login-form').addEventListener('submit',async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{await api('/login',{method:'POST',body:JSON.stringify({password:new FormData(e.target).get('password')})});e.target.reset();$('#login-error').textContent='';await start();}catch(err){$('#login-error').textContent=err.message;}finally{b.disabled=false;}});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});showLogin();}catch(e){toast(e.message);}});
 async function load(){const ticket=++listRequest;try{const [sort,direction]=$('#sort').value.split(':'),scope=$('#scope').value;const [data,categoryCount]=await Promise.all([api('/farmers?'+new URLSearchParams({q:$('#search').value,scope:scope==='review'?'registered':scope,review:scope==='review'||tab==='cleaning'?'open':'all',category:routeCategory||$('#category').value,registration:$('#registration').value,sort,direction,page})),routeCategory?api('/farmers?'+new URLSearchParams({scope:'registered',category:routeCategory,page_size:1})):Promise.resolve(null)]);if(ticket!==listRequest)return;
@@ -30,10 +42,9 @@ async function load(){const ticket=++listRequest;try{const [sort,direction]=$('#
  }catch(e){$('#directory').innerHTML=`<div class="empty error">${esc(e.message)}</div>`;}}
 let debounce;$('#search').addEventListener('input',()=>{clearTimeout(debounce);page=1;debounce=setTimeout(load,200);});for(const id of ['scope','category','registration','sort'])$('#'+id).addEventListener('change',()=>{page=1;load();});
 $('#clear-filters').addEventListener('click',()=>{for(const [id,value] of [['scope','registered'],['category',routeCategory||''],['registration',''],['sort','customer_id:asc'],['search','']])$('#'+id).value=value;clearTimeout(debounce);page=1;load();});
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!$('#workspace').hidden)load();});
+document.addEventListener('visibilitychange',()=>{if(!stakeholderRoute&&!document.hidden&&!$('#workspace').hidden)load();});
 document.addEventListener('pointerdown',e=>{const filters=$('#directory-filters');if(filters.open&&!filters.contains(e.target))filters.open=false;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#directory-filters').open){$('#directory-filters').open=false;$('#directory-filters summary').focus();}});
-document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{if(routeCategory){location.assign('/');return;}tab=b.dataset.nav;page=1;document.querySelectorAll('[data-nav]').forEach(n=>{n.classList.toggle('active',n===b);if(n===b)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');});$('#page-title').textContent=tab==='cleaning'?'Data cleaning':'Farmer Directory';$('#admin-panel-label').hidden=tab==='cleaning';$('#breadcrumb').textContent=tab==='cleaning'?'Data cleaning':'Farmers';$('#page-subtitle').textContent=tab==='cleaning'?'A clear place for the details we’ll confirm later.':'Every farmer, every detail. All in one place.';load();}));
 const kv=(label,value)=>`<div class="kv"><dt>${esc(label)}</dt><dd class="${!value||value==='Not confirmed'||value==='Not recorded'?'detail-missing':''}">${esc(value||'Not recorded')}</dd></div>`;
 async function openFarmer(id){try{current=await api('/farmers/'+id);renderDetail();if(!$('#detail-dialog').open)$('#detail-dialog').showModal();}catch(e){toast(e.message);}}
 function renderDetail(){const f=current,p=f.payments.find(x=>x.is_active),c=f.contacts.find(x=>x.is_primary_alternative)||f.contacts[0];
