@@ -50,7 +50,7 @@ try{
  const note=await request('/api/farmers/'+farmer.id+'/issues',{method:'POST',headers,body:JSON.stringify({field_name:'location',description:'TEST REVIEW ONLY'})});assert.equal(note.status,201);
  const reviewed=await (await request('/api/farmers?q=1%20open',{headers})).json();assert.equal(reviewed.stats.total,1);assert.equal(reviewed.farmers[0].open_issues,1);
  assert.equal((await (await request('/api/farmers?q=no-matching-column-value',{headers})).json()).stats.total,0);
- assert.equal((await (await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).json()).stats.total,0);
+ assert.equal((await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).status,400);
  const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({password:cmsSecret})});assert.equal(rotated.status,200);
  assert.equal((await request('/api/farmers',{headers})).status,401,'Previous login session must be revoked');
  headers.Cookie=rotated.headers.get('set-cookie').split(';')[0];

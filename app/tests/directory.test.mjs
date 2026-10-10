@@ -7,7 +7,7 @@ const params=o=>new URLSearchParams(o);
 test('directory validates structured filters and keeps free text parameterized',()=>{
  const query=directoryQuery(params({q:'100%_\\literal',sort:'customer_id',direction:'asc'}));assert(query.sql.includes('::numeric asc'));assert(query.values.includes('%100\\%\\_\\\\literal%'));assert(!query.sql.includes('literal'));assert.equal(query.pageSize,50);
  const defaults=directoryQuery(params({}));assert.equal(defaults.sort,'customer_id');assert.equal(defaults.direction,'asc');assert(defaults.sql.includes('::numeric asc NULLS LAST'));
- for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{status:'verified'},{review:'unknown'},{category:'Unknown'},{registration:'other'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
+ for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{scope:'demo'},{status:'verified'},{review:'unknown'},{category:'Unknown'},{registration:'other'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
 });
 test('category and registration filters combine; an unregistered profile gets one Farmer ID when completed',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
@@ -44,7 +44,7 @@ test('pagination traverses more than 200 farmers with accurate filtered counts, 
  const end=await listFarmers(c,params({q:'ISOLATED PAGINATION',page:'6'}));assert.equal(end.farmers.length,0);assert.equal(end.stats.total,205);
  const desc=await listFarmers(c,params({q:'ISOLATED PAGINATION',sort:'full_name',direction:'desc'}));assert.equal(desc.farmers[0].full_name,'ISOLATED PAGINATION 204');
  assert.equal((await listFarmers(c,params({q:'ISOLATED PAGINATION',status:'inactive'}))).stats.total,1);
- assert.equal((await listFarmers(c,params({q:'ISOLATED PAGINATION',scope:'demo'}))).stats.total,0);
+ assert.equal((await listFarmers(c,params({q:'ISOLATED PAGINATION',scope:'all'}))).stats.total,205);
  assert.equal((await listFarmers(c,params({q:'ISOLATED BUSINESS',county:'isolated county',location:'isolated location'}))).stats.total,205);
  await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'phone','ISOLATED REVIEW')",[first.farmers[0].id]);
  const review=await listFarmers(c,params({q:'ISOLATED PAGINATION',review:'open'}));assert.equal(review.stats.total,1);assert.equal(review.stats.needs_review,1);assert.equal(review.farmers[0].open_issues,1);

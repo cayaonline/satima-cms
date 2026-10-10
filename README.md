@@ -14,7 +14,7 @@ make copy-password
 
 Open **http://127.0.0.1:3000** and paste the copied password into the login screen. `make copy-password` copies only `CMS_PASSWORD` from `.env` to your macOS clipboard; it does not print the password. Existing installation credentials are already configured. `make start` starts PostgreSQL, checks migrations, configures the separate app role and builds/starts the application.
 
-The directory defaults to actual registrations. Demo records remain available under the Show dropdown and are never deleted automatically. Open a farmer to edit master/contact/payment details or see consent, verification, source transcription, change history and cleaning notes. New records default to pending verification. Marking a note resolved requires an explanation and does not silently alter consent evidence.
+The directory defaults to actual registrations. Demo records remain stored and are visible in All records; they are never deleted automatically. Open a farmer to edit master/contact/payment details or see consent, verification, source transcription, change history and cleaning notes. New records default to pending verification. Marking a note resolved requires an explanation and does not silently alter consent evidence.
 
 ## Run on another computer
 
