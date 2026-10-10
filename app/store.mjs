@@ -2,14 +2,17 @@ import pg from 'pg';
 export const pool = new pg.Pool({connectionString:process.env.DATABASE_URL,max:8,connectionTimeoutMillis:5000,statement_timeout:10000});
 export class Problem extends Error {constructor(status,message){super(message);this.status=status;}}
 const fields=['registered_business_name','full_name','national_id','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','kra_pin','registration_date','registered_by','status'];
+export const farmerCategories=['Satima Farmers','Larger Sagana Farmers','Kangema Farmers','Others'];
+export function category(value){if(value==null||value==='')return null;if(!farmerCategories.includes(value))throw new Problem(400,'Choose a valid farmer category.');return value;}
 export function text(value, name, required=false, max=300) {
  if(value==null||value===''){if(required)throw new Problem(400,`${name} is required.`);return null;}
  if(typeof value!=='string'||value.trim().length>max)throw new Problem(400,`${name} must be text up to ${max} characters.`);
  const t=value.trim();if(!t&&required)throw new Problem(400,`${name} is required.`);return t||null;
 }
-export function master(input) {
+export function master(input,complete=true) {
  if(!input||typeof input!=='object'||Array.isArray(input))throw new Problem(400,'Enter farmer details.');
- const out={};for(const f of fields)out[f]=text(input[f],f,['full_name','primary_phone','registered_by'].includes(f));
+ const out={};for(const f of fields)out[f]=text(input[f],f,f==='full_name'||(complete&&['primary_phone','registered_by'].includes(f)));
+ out.category=category(input.category);
  out.status=out.status||'pending_verification';
  if(!['active','inactive','suspended','pending_verification'].includes(out.status))throw new Problem(400,'Invalid farmer status.');
  if(out.registration_date&&(!/^\d{4}-\d{2}-\d{2}$/.test(out.registration_date)||Number.isNaN(Date.parse(out.registration_date))||new Date(out.registration_date).toISOString().slice(0,10)!==out.registration_date))throw new Problem(400,'Enter a valid registration date.');
@@ -19,8 +22,9 @@ export async function transaction(fn,actor='Local operator') {
  const c=await pool.connect();try{await c.query('BEGIN');await c.query("SELECT set_config('app.actor',$1,true)",[actor]);const result=await fn(c);await c.query('COMMIT');return result;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
 export async function createFarmer(c,input) {
+ if(input.registration_status&&input.registration_status!=='registered')throw new Problem(400,'Use the directory import for unregistered entries.');
  const data=master(input);const vals=fields.map(f=>data[f]);
- const {rows:[f]}=await c.query(`INSERT INTO farmers(${fields.join(',')}) VALUES(${vals.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING *`,vals);
+ const {rows:[f]}=await c.query(`INSERT INTO farmers(${fields.join(',')},category) VALUES(${vals.map((_,i)=>'$'+(i+1)).join(',')},$${vals.length+1}) RETURNING *`,[...vals,data.category]);
  await related(c,f.id,input);await evidence(c,f.id,input);return f;
 }
 async function related(c,id,input) {
@@ -48,16 +52,30 @@ export async function updateFarmer(c,id,input){
  const {rows:[old]}=await c.query('SELECT *,updated_at::text AS revision FROM farmers WHERE id=$1 FOR UPDATE',[id]);
  if(!old)throw new Problem(404,'Farmer not found.');
  if(input.revision!==old.revision)throw new Problem(409,'This record changed. Reload it before saving.');
- const data=master(input);
+ const registrationStatus=input.registration_status||old.registration_status;
+ if(!['registered','not_registered','review_required'].includes(registrationStatus))throw new Problem(400,'Invalid registration status.');
+ if(old.registration_status==='registered'&&registrationStatus!=='registered')throw new Problem(400,'Completed registration cannot be reversed.');
+ const promote=old.registration_status!=='registered'&&registrationStatus==='registered';
+ const data=master(input,registrationStatus==='registered');
+ if(promote&&!data.registration_date)throw new Problem(400,'Enter the actual registration date to complete registration.');
+ if(promote){
+  if(old.registration_status==='review_required'&&(await c.query("SELECT 1 FROM farmer_data_issues WHERE farmer_id=$1 AND status='open' LIMIT 1",[id])).rowCount)throw new Problem(409,'Resolve the identity review before completing registration.');
+  const duplicate=await c.query(`SELECT 1 FROM farmers WHERE id<>$1 AND record_kind='registered' AND registration_status='registered'
+   AND ((length(regexp_replace(coalesce(primary_phone,''),'[^0-9]','','g'))>=9
+    AND regexp_replace(regexp_replace(primary_phone,'[^0-9]','','g'),'^254','0')=regexp_replace(regexp_replace($2,'[^0-9]','','g'),'^254','0'))
+    OR ($3::text IS NOT NULL AND national_id=$3)) LIMIT 1`,[id,data.primary_phone,data.national_id]);
+  if(duplicate.rowCount)throw new Problem(409,'Possible existing registration. Review the phone or National ID before completing this profile.');
+ }
+ if(registrationStatus!=='registered'&&data.status!=='pending_verification')throw new Problem(400,'Unregistered entries cannot be activated.');
  if(old.primary_phone!==data.primary_phone)await c.query('UPDATE farmers SET primary_phone_normalized=NULL WHERE id=$1',[id]);
- await c.query(`UPDATE farmers SET ${fields.map((f,i)=>f+'=$'+(i+2)).join(',')} WHERE id=$1`,[id,...fields.map(f=>data[f])]);
+ await c.query(`UPDATE farmers SET ${fields.map((f,i)=>f+'=$'+(i+2)).join(',')},category=$${fields.length+2},registration_status=$${fields.length+3}${promote?',customer_id=next_farmer_customer_id()':''} WHERE id=$1`,[id,...fields.map(f=>data[f]),data.category,registrationStatus]);
  await related(c,id,input);await evidence(c,id,input);return {id};
 }
 export async function detail(id){
  const {rows:[f]}=await pool.query('SELECT *,registration_date::text,updated_at::text AS revision FROM farmers WHERE id=$1',[id]);
  if(!f)throw new Problem(404,'Farmer not found.');
- const children={contacts:'farmer_contacts',payments:'farmer_payment_profiles',consents:'farmer_consents',verifications:'farmer_verifications',sources:'farmer_registration_sources',issues:'farmer_data_issues',audit:'farmer_audit_events'};
- for(const [key,t] of Object.entries(children))f[key]=(await pool.query(`SELECT *${key==='issues'?',updated_at::text AS revision':''} FROM ${t} WHERE farmer_id=$1 ORDER BY ${key==='sources'?'imported_at':'created_at'} DESC,id DESC${key==='audit'?' LIMIT 30':''}`,[id])).rows;
+ const children={contacts:'farmer_contacts',payments:'farmer_payment_profiles',consents:'farmer_consents',verifications:'farmer_verifications',sources:'farmer_registration_sources',directory_sources:'farmer_directory_sources',issues:'farmer_data_issues',audit:'farmer_audit_events'};
+ for(const [key,t] of Object.entries(children))f[key]=(await pool.query(`SELECT *${key==='issues'?',updated_at::text AS revision':''} FROM ${t} WHERE farmer_id=$1 ORDER BY ${['sources','directory_sources'].includes(key)?'imported_at':'created_at'} DESC,id DESC${key==='audit'?' LIMIT 30':''}`,[id])).rows;
  return f;
 }
 

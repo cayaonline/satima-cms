@@ -6,7 +6,33 @@ after(()=>pool.end());
 const params=o=>new URLSearchParams(o);
 test('directory validates structured filters and keeps free text parameterized',()=>{
  const query=directoryQuery(params({q:'100%_\\literal',sort:'customer_id',direction:'asc'}));assert(query.sql.includes('::numeric asc'));assert(query.values.includes('%100\\%\\_\\\\literal%'));assert(!query.sql.includes('literal'));assert.equal(query.pageSize,50);
- for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{status:'verified'},{review:'unknown'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
+ for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{status:'verified'},{review:'unknown'},{category:'Unknown'},{registration:'other'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
+});
+test('category and registration filters combine; an unregistered profile gets one Farmer ID when completed',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
+ const c=await pool.connect();await c.query('BEGIN');try{
+  const registered=await createFarmer(c,{full_name:'ISOLATED REGISTERED',primary_phone:'TEST-REGISTERED',registered_by:'TEST',category:'Satima Farmers'});
+  const {rows:[lead]}=await c.query("INSERT INTO farmers(customer_id,full_name,primary_phone,registered_by,registration_date,category,registration_status) VALUES(NULL,'ISOLATED UNREGISTERED','TEST-UNREGISTERED',NULL,NULL,'Larger Sagana Farmers','not_registered') RETURNING id");
+  const all=await listFarmers(c,params({q:'ISOLATED'}));assert.equal(all.stats.total,2);assert.equal(all.stats.registered,1);assert.equal(all.stats.not_registered,1);assert.equal(all.stats.categories['Larger Sagana Farmers'],1);
+  const filtered=await listFarmers(c,params({category:'Larger Sagana Farmers',registration:'not_registered',q:'UNREGISTERED'}));assert.equal(filtered.stats.total,1);assert.equal(filtered.farmers[0].customer_id,null);
+  assert.equal((await listFarmers(c,params({category:'Satima Farmers',registration:'not_registered'}))).stats.total,0);
+  let revision=(await c.query('SELECT updated_at::text AS revision FROM farmers WHERE id=$1',[lead.id])).rows[0].revision;
+  await updateFarmer(c,lead.id,{full_name:'ISOLATED UNREGISTERED',primary_phone:'TEST-UNREGISTERED',registration_status:'not_registered',category:'Others',revision});
+  assert.equal((await listFarmers(c,params({category:'Others',registration:'not_registered'}))).stats.total,1);
+  revision=(await c.query('SELECT updated_at::text AS revision FROM farmers WHERE id=$1',[lead.id])).rows[0].revision;
+  await assert.rejects(()=>updateFarmer(c,lead.id,{full_name:'ISOLATED UNREGISTERED',primary_phone:'TEST-UNREGISTERED',registered_by:'TEST',registration_status:'registered',category:'Others',revision}),e=>e.status===400);
+  const result=await updateFarmer(c,lead.id,{full_name:'ISOLATED UNREGISTERED',primary_phone:'TEST-UNREGISTERED',registered_by:'TEST',registration_date:'2026-10-10',registration_status:'registered',category:'Others',revision});
+  assert.equal(result.id,lead.id);
+  const {rows:[completed]}=await c.query('SELECT customer_id,category,registration_status FROM farmers WHERE id=$1',[lead.id]);assert.match(completed.customer_id,/^SF-F-\d{4,}$/);assert.equal(completed.category,'Others');assert.equal(completed.registration_status,'registered');assert.notEqual(completed.customer_id,registered.customer_id);
+  assert.equal((await listFarmers(c,params({category:'Others',registration:'registered'}))).stats.total,1);
+  assert.equal((await c.query('SELECT count(*)::int AS n FROM farmers WHERE id=$1',[lead.id])).rows[0].n,1);
+  await createFarmer(c,{full_name:'ISOLATED PHONE OWNER',primary_phone:'0712345678',registered_by:'TEST'});
+  const {rows:[uncertain]}=await c.query("INSERT INTO farmers(customer_id,full_name,registration_date,registration_status,category) VALUES(NULL,'ISOLATED UNCERTAIN',NULL,'review_required','Others') RETURNING id,updated_at::text AS revision");
+  const {rows:[issue]}=await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'registration_match','ISOLATED IDENTITY REVIEW') RETURNING id",[uncertain.id]);
+  const completion={full_name:'ISOLATED UNCERTAIN',primary_phone:'0712345678',registered_by:'TEST',registration_date:'2026-10-10',registration_status:'registered',category:'Others',revision:uncertain.revision};
+  await assert.rejects(()=>updateFarmer(c,uncertain.id,completion),e=>e.status===409&&e.message.includes('identity review'));
+  await c.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='ISOLATED REVIEW COMPLETE',resolved_at=now() WHERE id=$1",[issue.id]);
+  await assert.rejects(()=>updateFarmer(c,uncertain.id,completion),e=>e.status===409&&e.message.includes('existing registration'));
+ }finally{await c.query('ROLLBACK');c.release();}
 });
 test('pagination traverses more than 200 farmers with accurate filtered counts, ordering and literal search',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
