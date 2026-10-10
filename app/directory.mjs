@@ -7,7 +7,7 @@ export function directoryQuery(params){
  const page=integer('page',1,1000000),pageSize=integer('page_size',50,500);
  const scope=params.get('scope')||'registered',status=params.get('status')||'',review=params.get('review')||'all';
  const category=params.get('category')||'',registration=params.get('registration')||'';
- const sort=params.get('sort')||'created_at',direction=params.get('direction')||(sort==='created_at'?'desc':'asc');
+ const sort=params.get('sort')||'customer_id',direction=params.get('direction')||(sort==='created_at'?'desc':'asc');
  if(!['registered','demo','all'].includes(scope)||status&&!statuses.includes(status)||category&&!farmerCategories.includes(category)||registration&&!['registered','not_registered','review_required'].includes(registration)||!['all','open','clear'].includes(review)||!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction))throw new Problem(400,'Invalid directory filter or sort');
  const q=(params.get('q')||'').trim();if(q.length>100)throw new Problem(400,'Search must be at most 100 characters');
  const values=[],conditions=[];const bind=v=>{values.push(v);return '$'+values.length;};

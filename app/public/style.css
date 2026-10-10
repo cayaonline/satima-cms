@@ -143,8 +143,8 @@ header strong{color:var(--ink);font-weight:600}
 .supplier-category strong{display:block;color:var(--ink);font:400 30px Georgia,serif;margin-top:8px}
 .category-incomplete{color:var(--muted);font-size:12px;margin:12px 0 0}
 .table-wrap table{min-width:1150px}
-.table-wrap th:nth-child(3){width:20%}
-.table-wrap th:nth-child(4){width:170px}
+.table-wrap th:nth-child(3){width:170px}
+.table-wrap th:nth-child(4){width:20%}
 .table-wrap th:nth-child(5){width:145px}
 .table-wrap th:nth-child(6){width:17%}
 .table-wrap th:nth-child(7){width:145px}
