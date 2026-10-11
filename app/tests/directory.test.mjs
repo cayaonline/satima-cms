@@ -1,9 +1,26 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {directoryQuery,listFarmers} from '../directory.mjs';
+import {listOperationsFarmers} from '../operations-directory.mjs';
 import {pool,createFarmer,updateFarmer} from '../store.mjs';
 after(()=>pool.end());
 const params=o=>new URLSearchParams(o);
+test('gender stays unverified until sourced and filters are exact in both portals',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
+ const c=await pool.connect();await c.query('BEGIN');try{
+  const a=await createFarmer(c,{full_name:'ISOLATED GENDER A',primary_phone:'GENDER-A',registered_by:'TEST',category:'Others'});
+  const b=await createFarmer(c,{full_name:'ISOLATED GENDER B',primary_phone:'GENDER-B',registered_by:'TEST',category:'Others',gender:'female',gender_source:'registration_document'});
+  assert.equal((await c.query('SELECT gender FROM farmers WHERE id=$1',[a.id])).rows[0].gender,'not_verified');
+  const revision=(await c.query('SELECT updated_at::text AS revision FROM farmers WHERE id=$1',[a.id])).rows[0].revision;
+  await updateFarmer(c,a.id,{full_name:'ISOLATED GENDER A',primary_phone:'GENDER-A',registered_by:'TEST',category:'Others',gender:'male',gender_source:'farmer_confirmation',revision});
+  for(const list of [listFarmers,listOperationsFarmers]){
+   assert.equal((await list(c,params({q:'Male',category:'Others'}))).stats.total,1);
+   assert.equal((await list(c,params({q:'Female',category:'Others'}))).stats.total,1);
+   assert.equal((await list(c,params({gender:'male',category:'Others'}))).farmers[0].id,a.id);
+   assert.equal((await list(c,params({gender:'female',category:'Others'}))).farmers[0].id,b.id);
+   assert.equal((await list(c,params({gender:'not_verified',category:'Others'}))).stats.total,0);
+  }
+ }finally{await c.query('ROLLBACK');c.release();}
+});
 test('directory validates structured filters and keeps free text parameterized',()=>{
  const query=directoryQuery(params({q:'100%_\\literal',sort:'customer_id',direction:'asc'}));assert(query.sql.includes('::numeric asc'));assert(query.values.includes('%100\\%\\_\\\\literal%'));assert(!query.sql.includes('literal'));assert.equal(query.pageSize,50);
  const defaults=directoryQuery(params({}));assert.equal(defaults.sort,'customer_id');assert.equal(defaults.direction,'asc');assert(defaults.sql.includes('::numeric asc NULLS LAST'));

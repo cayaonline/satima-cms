@@ -4,6 +4,15 @@ export class Problem extends Error {constructor(status,message){super(message);t
 const fields=['registered_business_name','full_name','national_id','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','kra_pin','registration_date','registered_by','status'];
 export const farmerCategories=['Satima Farmers','Larger Sagana Farmers','Kangema Farmers','Others'];
 export function category(value){if(value==null||value==='')return null;if(!farmerCategories.includes(value))throw new Problem(400,'Choose a valid farmer category.');return value;}
+export const farmerGenders=['male','female','not_verified'];
+export function genderEvidence(input,old=null){
+ const gender=input.gender??old?.gender??'not_verified';
+ if(!farmerGenders.includes(gender))throw new Problem(400,'Choose Male, Female or Not verified.');
+ if(gender==='not_verified')return {gender,gender_source:null,gender_verified_at:null};
+ const source=input.gender_source??(gender===old?.gender?old.gender_source:null);
+ if(!['registration_document','farmer_confirmation'].includes(source))throw new Problem(400,'Choose the document or farmer confirmation used to verify gender.');
+ return {gender,gender_source:source,gender_verified_at:gender===old?.gender&&source===old?.gender_source?old.gender_verified_at:new Date()};
+}
 export function text(value, name, required=false, max=300) {
  if(value==null||value===''){if(required)throw new Problem(400,`${name} is required.`);return null;}
  if(typeof value!=='string'||value.trim().length>max)throw new Problem(400,`${name} must be text up to ${max} characters.`);
@@ -23,8 +32,8 @@ export async function transaction(fn,actor='Local operator') {
 }
 export async function createFarmer(c,input) {
  if(input.registration_status&&input.registration_status!=='registered')throw new Problem(400,'Use the directory import for unregistered entries.');
- const data=master(input);const vals=fields.map(f=>data[f]);
- const {rows:[f]}=await c.query(`INSERT INTO farmers(${fields.join(',')},category) VALUES(${vals.map((_,i)=>'$'+(i+1)).join(',')},$${vals.length+1}) RETURNING *`,[...vals,data.category]);
+ const data=master(input),gender=genderEvidence(input);const vals=fields.map(f=>data[f]);
+ const {rows:[f]}=await c.query(`INSERT INTO farmers(${fields.join(',')},category,gender,gender_source,gender_verified_at) VALUES(${vals.map((_,i)=>'$'+(i+1)).join(',')},$${vals.length+1},$${vals.length+2},$${vals.length+3},$${vals.length+4}) RETURNING *`,[...vals,data.category,gender.gender,gender.gender_source,gender.gender_verified_at]);
  await related(c,f.id,input);await evidence(c,f.id,input);return f;
 }
 async function related(c,id,input) {
@@ -57,6 +66,7 @@ export async function updateFarmer(c,id,input){
  if(old.registration_status==='registered'&&registrationStatus!=='registered')throw new Problem(400,'Completed registration cannot be reversed.');
  const promote=old.registration_status!=='registered'&&registrationStatus==='registered';
  const data=master(input,registrationStatus==='registered');
+ const gender=genderEvidence(input,old);
  if(promote&&!data.registration_date)throw new Problem(400,'Enter the actual registration date to complete registration.');
  if(promote){
   if(old.registration_status==='review_required'&&(await c.query("SELECT 1 FROM farmer_data_issues WHERE farmer_id=$1 AND status='open' LIMIT 1",[id])).rowCount)throw new Problem(409,'Resolve the identity review before completing registration.');
@@ -68,11 +78,11 @@ export async function updateFarmer(c,id,input){
  }
  if(registrationStatus!=='registered'&&data.status!=='pending_verification')throw new Problem(400,'Unregistered entries cannot be activated.');
  if(old.primary_phone!==data.primary_phone)await c.query('UPDATE farmers SET primary_phone_normalized=NULL WHERE id=$1',[id]);
- await c.query(`UPDATE farmers SET ${fields.map((f,i)=>f+'=$'+(i+2)).join(',')},category=$${fields.length+2},registration_status=$${fields.length+3}${promote?',customer_id=next_farmer_customer_id()':''} WHERE id=$1`,[id,...fields.map(f=>data[f]),data.category,registrationStatus]);
+ await c.query(`UPDATE farmers SET ${fields.map((f,i)=>f+'=$'+(i+2)).join(',')},category=$${fields.length+2},registration_status=$${fields.length+3},gender=$${fields.length+4},gender_source=$${fields.length+5},gender_verified_at=$${fields.length+6}${promote?',customer_id=next_farmer_customer_id()':''} WHERE id=$1`,[id,...fields.map(f=>data[f]),data.category,registrationStatus,gender.gender,gender.gender_source,gender.gender_verified_at]);
  await related(c,id,input);await evidence(c,id,input);return {id};
 }
 export async function detail(id){
- const {rows:[f]}=await pool.query('SELECT *,registration_date::text,updated_at::text AS revision FROM farmers WHERE id=$1',[id]);
+ const {rows:[f]}=await pool.query('SELECT *,registration_date::text,updated_at::text AS revision,EXISTS(SELECT FROM farmer_photographs p WHERE p.farmer_id=farmers.id) AS has_photograph FROM farmers WHERE id=$1',[id]);
  if(!f)throw new Problem(404,'Farmer not found.');
  const children={contacts:'farmer_contacts',payments:'farmer_payment_profiles',consents:'farmer_consents',verifications:'farmer_verifications',sources:'farmer_registration_sources',directory_sources:'farmer_directory_sources',issues:'farmer_data_issues',audit:'farmer_audit_events'};
  for(const [key,t] of Object.entries(children))f[key]=(await pool.query(`SELECT *${key==='issues'?',updated_at::text AS revision':''} FROM ${t} WHERE farmer_id=$1 ORDER BY ${['sources','directory_sources'].includes(key)?'imported_at':'created_at'} DESC,id DESC${key==='audit'?' LIMIT 30':''}`,[id])).rows;

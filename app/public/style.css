@@ -185,14 +185,15 @@ main{margin-left:0}
 .back-directory{display:inline-block;color:var(--green);font-size:12px;text-decoration:none;margin-bottom:12px}
 .back-directory:hover{text-decoration:underline;text-underline-offset:3px}
 .category-total{margin:7px 0 0;color:var(--muted);font-size:12px}
-.table-wrap table{min-width:1150px}
+.table-wrap table{min-width:1260px}
 .table-wrap th:nth-child(3){width:170px}
 .table-wrap th:nth-child(4){width:20%}
 .table-wrap th:nth-child(5){width:145px}
 .table-wrap th:nth-child(6){width:17%}
 .table-wrap th:nth-child(7){width:145px}
-.table-wrap th:nth-child(8){width:160px}
-.table-wrap th:nth-child(9){width:90px}
+.table-wrap th:nth-child(8){width:110px}
+.table-wrap th:nth-child(9){width:160px}
+.table-wrap th:nth-child(10){width:90px}
 .table-wrap td:nth-child(4){white-space:normal;overflow-wrap:break-word}
 .table-wrap td:nth-child(5),.table-wrap td:nth-child(6),.table-wrap td:nth-child(7){white-space:normal;overflow-wrap:anywhere}
 @media(max-width:600px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.category-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.supplier-category{padding:16px}}
@@ -209,3 +210,13 @@ main{margin-left:0}
 .filter-panel select{margin-top:6px;min-width:0;width:100%;color:var(--ink)}
 .filter-panel .link-button{justify-self:start;grid-column:1/-1}
 @media(max-width:600px){.toolbar{align-items:stretch}.filter-panel{grid-template-columns:1fr;gap:12px}}
+.profile-photo{margin-bottom:20px}
+.profile-photo .photo-row{display:flex;align-items:flex-start;gap:22px}
+.passport-photo{display:block;width:144px;height:192px;aspect-ratio:3/4;object-fit:cover;flex:none;border:1px solid var(--line);border-radius:7px;background:#eef2eb}
+.photo-meta{max-width:320px;min-width:0;flex:1}
+.photo-meta p{margin:0 0 12px}
+.photo-meta input[type=file]{font-size:12px;max-width:100%}
+.photo-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:12px}
+.photo-actions .link-button{min-height:40px}
+.photo-meta .error{margin:8px 0 0;min-height:18px}
+@media(max-width:500px){.profile-photo .photo-row{flex-direction:column;gap:14px}.photo-meta{width:100%;max-width:none}}

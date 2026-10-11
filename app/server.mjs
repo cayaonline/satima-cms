@@ -6,6 +6,7 @@ import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
+import {photographBody,readPhotograph,savePhotograph,removePhotograph} from './photographs.mjs';
 if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<16)throw new Error('CMS_PASSWORD must be at least 16 characters.');
 const ttl=8*3600*1000,sessions=new SessionStore({ttl}),attempts=new LoginLimiter();
 const viewerSessions=new SessionStore({ttl}),viewerAttempts=new LoginLimiter();
@@ -14,11 +15,12 @@ if((viewerUsername||viewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(viewerU
 const viewerEnabled=!!(viewerUsername&&viewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
+function sendPhotograph(res,photo){res.writeHead(200,{'Content-Type':photo.content_type,'Content-Length':photo.image_data.length,'X-Content-Type-Options':'nosniff'});res.end(photo.image_data);}
 async function body(req){let data='';for await(const b of req){data+=b;if(data.length>40000)throw new Problem(413,'Request too large.');}try{const value=JSON.parse(data);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new Problem(400,'Invalid JSON.');}}
 function cookieToken(req,name='satima_session'){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1);}
 function session(req){const token=cookieToken(req);return sessions.role(token)==='administrator'?token:null;}
@@ -26,7 +28,7 @@ function viewerSession(req){const token=cookieToken(req,'satima_viewer_session')
 setInterval(()=>{sessions.prune();viewerSessions.prune();attempts.prune();viewerAttempts.prune();},60000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
- res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+ res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
  try {
  // Render health probes can use an internal host; this route returns no farmer data.
  if(req.url==='/health'&&req.method==='GET'){await pool.query('SELECT 1');return send(res,200,{status:'healthy'});}
@@ -65,6 +67,8 @@ const server=http.createServer(async(req,res)=>{
   }
   if(req.method!=='GET')throw new Problem(403,'Operations access is read-only.');
   if(path==='/api/operations/farmers')return send(res,200,await listOperationsFarmers(pool,url.searchParams));
+  const viewerPhoto=path.match(/^\/api\/operations\/farmers\/([^/]+)\/photo$/);
+  if(viewerPhoto){if(!uuid.test(viewerPhoto[1]))throw new Problem(400,'Invalid farmer identifier.');return sendPhotograph(res,await readPhotograph(pool,viewerPhoto[1],true));}
   const viewerFarmer=path.match(/^\/api\/operations\/farmers\/([^/]+)$/);
   if(viewerFarmer){if(!uuid.test(viewerFarmer[1]))throw new Problem(400,'Invalid farmer identifier.');return send(res,200,await operationsFarmerDetail(pool,viewerFarmer[1]));}
   throw new Problem(404,'Not found.');
@@ -74,6 +78,12 @@ const server=http.createServer(async(req,res)=>{
  if(path==='/api/logout'&&req.method==='POST'){sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
  if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
  if(path==='/api/farmers'&&req.method==='POST'){const b=await body(req);const f=await transaction(c=>createFarmer(c,b));return send(res,201,{id:f.id,customer_id:f.customer_id});}
+ const photoPath=path.match(/^\/api\/farmers\/([^/]+)\/photo$/);
+ if(photoPath){if(!uuid.test(photoPath[1]))throw new Problem(400,'Invalid farmer identifier.');
+  if(req.method==='GET')return sendPhotograph(res,await readPhotograph(pool,photoPath[1]));
+  if(req.method==='PUT'){const photo=await photographBody(req);await transaction(c=>savePhotograph(c,photoPath[1],photo));return send(res,200,{ok:true});}
+  if(req.method==='DELETE'){await transaction(c=>removePhotograph(c,photoPath[1]));return send(res,200,{ok:true});}
+ }
  const m=path.match(/^\/api\/farmers\/([^/]+)(?:\/(issues))?$/);
  if(m){if(!uuid.test(m[1]))throw new Problem(400,'Invalid farmer identifier.');
  if(!m[2]&&req.method==='GET')return send(res,200,await detail(m[1]));
