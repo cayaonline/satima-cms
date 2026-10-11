@@ -53,3 +53,27 @@ export async function operationsFarmerDetail(pool,id){
  ]);
  return {...farmer,registration_sources:registrationSources.rows,directory_sources:directorySources.rows};
 }
+
+// This projection is reachable only through the elevated Operations route. It
+// deliberately omits administrative notes and audit history from its response.
+export async function operationsFarmerRegistrationDetail(pool,id,viewerUsername){
+ const client=await pool.connect();
+ try{
+  await client.query('BEGIN');
+  const {rows:[farmer]}=await client.query(`SELECT id,national_id,kra_pin,physical_address,registered_by
+   FROM farmers WHERE id=$1 AND record_kind='registered'`,[id]);
+  if(!farmer)throw new Problem(404,'Farmer not found.');
+  const [contacts,payments,consents,verifications,sources,directorySources]=await Promise.all([
+   client.query(`SELECT full_name,phone_number,relationship,contact_type,is_primary_alternative FROM farmer_contacts WHERE farmer_id=$1 ORDER BY created_at DESC,id DESC`,[id]),
+   client.query(`SELECT mpesa_registered_name,mpesa_phone_number,verified,is_active FROM farmer_payment_profiles WHERE farmer_id=$1 ORDER BY created_at DESC,id DESC`,[id]),
+   client.query(`SELECT consent_version,information_accuracy_confirmed,data_processing_consent,communications_consent,consent_given,signed_name,signature_method,consent_date,withdrawn_at FROM farmer_consents WHERE farmer_id=$1 ORDER BY created_at DESC,id DESC`,[id]),
+   client.query(`SELECT national_id_verified,kra_pin_verified,primary_phone_verified,mpesa_number_verified,mpesa_registered_name_confirmed,registration_form_complete,consent_obtained,verified_by,verified_at,notes FROM farmer_verifications WHERE farmer_id=$1 ORDER BY created_at DESC,id DESC`,[id]),
+   client.query(`SELECT document_name,first_page,last_page,raw_transcription,imported_at FROM farmer_registration_sources WHERE farmer_id=$1 ORDER BY imported_at DESC,id DESC`,[id]),
+   client.query(`SELECT document_name,page_number FROM farmer_directory_sources WHERE farmer_id=$1 ORDER BY imported_at DESC,id DESC`,[id])
+  ]);
+  await client.query('INSERT INTO farmer_sensitive_access_events(farmer_id,viewer_username) VALUES($1,$2)',[id,viewerUsername]);
+  await client.query('COMMIT');
+  return {...farmer,contacts:contacts.rows,payments:payments.rows,consents:consents.rows,verifications:verifications.rows,sources:sources.rows,directory_sources:directorySources.rows};
+ }catch(error){await client.query('ROLLBACK');throw error;}
+ finally{client.release();}
+}

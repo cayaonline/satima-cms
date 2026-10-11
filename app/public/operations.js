@@ -8,6 +8,7 @@ const stakeholderPages={
 };
 const stakeholderRoute=stakeholderPages[location.pathname];
 let page=1,requestNumber=0,debounce;
+let sensitiveRegistration=false;
 
 if(routeCategory){
  document.title=routeCategory+' · Morning Dew Operations Portal';
@@ -31,7 +32,7 @@ async function api(path,options={}){
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{await api('/session');if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(!stakeholderRoute)await load();}catch{showLogin();}}
+async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(!stakeholderRoute)await load();}catch{showLogin();}}
 $('#login-form').addEventListener('submit',async event=>{
  event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;
  try{await api('/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.target)))});event.target.reset();$('#login-error').textContent='';location.assign('/operations');}
@@ -44,6 +45,18 @@ function genderLabel(value){return {male:'Male',female:'Female',not_verified:'No
 function registrationLabel(value){return value==='registered'?'Registered':'Not registered';}
 function date(value){return value?new Date(value+'T12:00:00+03:00').toLocaleDateString('en-GB',{timeZone:'Africa/Nairobi'}):'Not recorded';}
 function field(label,value){return `<div class="kv"><dt>${esc(label)}</dt><dd>${esc(value||'Not recorded')}</dd></div>`;}
+function sensitiveField(label,value){return `<div class="kv"><dt>${esc(label)}</dt><dd>${esc(value===null||value===undefined||value===''?'Not Recorded':value)}</dd></div>`;}
+function recordedBoolean(value){return value===true?'Yes':value===false?'No':'Not Recorded';}
+function evidenceCards(items,render){return items.length?items.map((item,index)=>`<div class="card"><p class="muted">Record ${index+1}</p>${render(item)}</div>`).join(''):'<p class="muted">Not Recorded</p>';}
+function registrationDetails(record){
+ const nextOfKin=record.contacts.filter(contact=>contact.contact_type==='next_of_kin'||contact.is_primary_alternative);
+ const payment=record.payments;
+ const consents=evidenceCards(record.consents,consent=>`<dl>${sensitiveField('Signed name',consent.signed_name)}${sensitiveField('Signature method',consent.signature_method)}${sensitiveField('Signature image','Not Recorded')}${sensitiveField('Consent date',consent.consent_date)}${sensitiveField('Consent given',recordedBoolean(consent.consent_given))}${sensitiveField('Information accuracy',recordedBoolean(consent.information_accuracy_confirmed))}${sensitiveField('Data processing',recordedBoolean(consent.data_processing_consent))}${sensitiveField('Communications',recordedBoolean(consent.communications_consent))}${sensitiveField('Withdrawal date',consent.withdrawn_at)}</dl>`);
+ const verifications=evidenceCards(record.verifications,verification=>`<dl>${sensitiveField('Verified by',verification.verified_by)}${sensitiveField('Verified at',verification.verified_at)}${sensitiveField('Officer signature image','Not Recorded')}${[['National ID verified','national_id_verified'],['KRA PIN verified','kra_pin_verified'],['Primary phone verified','primary_phone_verified'],['M-Pesa number verified','mpesa_number_verified'],['M-Pesa name confirmed','mpesa_registered_name_confirmed'],['Registration form complete','registration_form_complete'],['Consent obtained','consent_obtained']].map(([label,key])=>sensitiveField(label,recordedBoolean(verification[key]))).join('')}${sensitiveField('Notes',verification.notes)}</dl>`);
+ const sources=evidenceCards(record.sources,source=>`<p>${esc(source.document_name)} · Pages ${esc(source.first_page)}–${esc(source.last_page)}</p><pre class="registration-transcript">${esc(JSON.stringify(source.raw_transcription,null,2))}</pre>`);
+ const directorySources=record.directory_sources.length?`<ul class="source-list">${record.directory_sources.map(source=>`<li>${esc(source.document_name)} · Page ${esc(source.page_number)}</li>`).join('')}</ul>`:'<p class="muted">Not Recorded</p>';
+ return `<section class="registration-details" aria-labelledby="registration-details-title"><h3 id="registration-details-title">Registration &amp; Verification Details</h3><div class="detail-grid"><div class="card"><h3>Identification</h3><dl>${sensitiveField('National ID Number',record.national_id)}${sensitiveField('KRA PIN',record.kra_pin)}${sensitiveField('Physical address',record.physical_address)}${sensitiveField('Registered by',record.registered_by)}</dl></div><div class="card"><h3>Contact &amp; Payment</h3><h4>Next of Kin</h4>${evidenceCards(nextOfKin,contact=>`<dl>${sensitiveField('Name',contact.full_name)}${sensitiveField('Phone',contact.phone_number)}${sensitiveField('Relationship',contact.relationship)}</dl>`)}<h4>M-Pesa</h4>${evidenceCards(payment,item=>`<dl>${sensitiveField('Registered name',item.mpesa_registered_name)}${sensitiveField('Registered number',item.mpesa_phone_number)}${sensitiveField('Verified',recordedBoolean(item.verified))}${sensitiveField('Active',recordedBoolean(item.is_active))}</dl>`)}</div></div><details class="evidence"><summary>Consent &amp; Signatures</summary><h4>Consent records</h4>${consents}<h4>Verification records</h4>${verifications}</details><details class="evidence"><summary>Original Registration Records</summary><h4>Raw registration form transcripts</h4>${sources}<h4>Supporting document references</h4>${directorySources}</details></section>`;
+}
 function photoCard(farmer){return `<section class="card profile-photo"><h3>Farmer Photograph</h3><div class="photo-row"><img class="passport-photo" src="${farmer.has_photograph?`/api/operations/farmers/${esc(farmer.id)}/photo`:'/portrait-placeholder.svg'}" alt="${farmer.has_photograph?`Photograph of ${esc(farmer.full_name)}`:'No photograph uploaded'}"><p class="muted">${farmer.has_photograph?'Photograph on file.':'No photograph uploaded yet.'}</p></div></section>`;}
 
 async function load(){
@@ -62,12 +75,12 @@ async function load(){
 
 $('#directory').addEventListener('click',async event=>{
  const view=event.target.closest('[data-view]');
- if(view){try{const farmer=await api('/farmers/'+encodeURIComponent(view.dataset.view));renderDetail(farmer);$('#detail-dialog').showModal();}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}return;}
+ if(view){try{const id=encodeURIComponent(view.dataset.view);const farmer=await api('/farmers/'+id);const registration=sensitiveRegistration?await api('/farmers/'+id+'/registration'):null;renderDetail(farmer,registration);$('#detail-dialog').showModal();}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}return;}
  const next=event.target.closest('[data-page]');if(next&&!next.disabled){page=Number(next.dataset.page);load();}
 });
-function renderDetail(farmer){
+function renderDetail(farmer,registration){
  const references=[...farmer.registration_sources.map(source=>`${source.document_name} · pages ${source.first_page}–${source.last_page}`),...farmer.directory_sources.map(source=>`${source.document_name} · page ${source.page_number}`)];
- $('#detail').innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(farmer.customer_id||'Farmer record')}</span><h2>${esc(farmer.full_name)}</h2><small>${esc(farmer.category||'Not assigned')} · ${esc(registrationLabel(farmer.registration_status))} · Read-only</small></div><button class="icon-button" id="close-detail" aria-label="Close farmer">×</button></div><div class="dialog-body">${photoCard(farmer)}<div class="detail-grid"><div class="card"><h3>Farmer information</h3><dl>${field('Business',farmer.registered_business_name)}${field('Registration date',date(farmer.registration_date))}${field('Primary phone',farmer.primary_phone)}${field('Gender',genderLabel(farmer.gender))}</dl></div><div class="card"><h3>Location</h3><dl>${field('Village / area',farmer.village_area)}${field('Sub-location',farmer.sub_location)}${field('Location',farmer.location)}${field('Sub-county',farmer.sub_county)}${field('County',farmer.county)}</dl></div></div><div class="card"><h3>Paper-form evidence</h3>${references.length?`<ul class="source-list">${references.map(reference=>`<li>${esc(reference)}</li>`).join('')}</ul>`:'<p class="muted">No source reference recorded.</p>'}</div></div>`;
+ $('#detail').innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(farmer.customer_id||'Farmer record')}</span><h2>${esc(farmer.full_name)}</h2><small>${esc(farmer.category||'Not assigned')} · ${esc(registrationLabel(farmer.registration_status))} · Read-only</small></div><button class="icon-button" id="close-detail" aria-label="Close farmer">×</button></div><div class="dialog-body">${photoCard(farmer)}<div class="detail-grid"><div class="card"><h3>Farmer information</h3><dl>${field('Business',farmer.registered_business_name)}${field('Registration date',date(farmer.registration_date))}${field('Primary phone',farmer.primary_phone)}${field('Gender',genderLabel(farmer.gender))}</dl></div><div class="card"><h3>Location</h3><dl>${field('Village / area',farmer.village_area)}${field('Sub-location',farmer.sub_location)}${field('Location',farmer.location)}${field('Sub-county',farmer.sub_county)}${field('County',farmer.county)}</dl></div></div><div class="card"><h3>Paper-form evidence</h3>${references.length?`<ul class="source-list">${references.map(reference=>`<li>${esc(reference)}</li>`).join('')}</ul>`:'<p class="muted">No source reference recorded.</p>'}</div>${registration?registrationDetails(registration):''}</div>`;
  $('#close-detail').addEventListener('click',()=>$('#detail-dialog').close());
 }
 $('#detail-dialog').addEventListener('click',event=>{if(event.target===$('#detail-dialog'))$('#detail-dialog').close();});

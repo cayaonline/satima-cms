@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {hashViewerPassword} from '../security.mjs';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
 const name='satima-hosting-test-'+randomBytes(4).toString('hex');
-const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(9).toString('base64url').slice(0,9);
+const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(9).toString('base64url').slice(0,9),registrationSecret=randomBytes(18).toString('base64url');
 function crc32(bytes){let value=0xffffffff;for(const byte of bytes){value^=byte;for(let i=0;i<8;i++)value=(value>>>1)^(-(value&1)&0xedb88320);}return (value^0xffffffff)>>>0;}
 function pngChunk(type,data){const tag=Buffer.from(type),result=Buffer.alloc(data.length+12);result.writeUInt32BE(data.length);tag.copy(result,4);data.copy(result,8);result.writeUInt32BE(crc32(Buffer.concat([tag,data])),data.length+8);return result;}
 function pngPixel(r,g,b){const header=Buffer.alloc(13);header.writeUInt32BE(1,0);header.writeUInt32BE(1,4);header[8]=8;header[9]=2;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',header),pngChunk('IDAT',deflateSync(Buffer.from([0,r,g,b]))),pngChunk('IEND',Buffer.alloc(0))]);}
@@ -24,7 +24,7 @@ try{
  // Exercise migrations as an ordinary database owner with CREATEROLE, not superuser.
  await db.query('CREATE ROLE satima_admin LOGIN CREATEROLE PASSWORD '+pg.escapeLiteral(secret));
  await db.query('CREATE DATABASE satima_cms OWNER satima_admin');
- const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
+ const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),REGISTRATION_VIEWER_USERNAME:'registration-review',REGISTRATION_VIEWER_PASSWORD_HASH:await hashViewerPassword(registrationSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
  migration(env);migration(env);
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
@@ -105,6 +105,33 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const viewerDetail=await (await request('/api/operations/farmers/'+farmer.id,{headers:viewerHeaders})).json();
  assert.equal(viewerDetail.gender,'male');assert.equal(viewerDetail.has_photograph,true);
  assert(!Object.hasOwn(viewerDetail,'gender_source'));
+ const sensitivePath='/api/operations/farmers/'+farmer.id+'/registration';
+ assert.equal((await request(sensitivePath)).status,401);
+ assert.equal((await request(sensitivePath,{headers:viewerHeaders})).status,403,'Ordinary Operations users cannot read sensitive registration fields');
+ assert.equal((await request(sensitivePath,{headers})).status,401,'Administrator cookie is separate from Operations access');
+ const testDb=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await testDb.connect();
+ try{
+  await testDb.query(`INSERT INTO farmer_registration_sources(farmer_id,document_name,document_sha256,first_page,last_page,raw_transcription) VALUES($1,$2,$3,1,2,$4)`,[farmer.id,'TEST FORM','a'.repeat(64),JSON.stringify({farmer_signature:'SIGNATURE TRANSCRIPTION'})]);
+  await testDb.query(`INSERT INTO farmer_consents(farmer_id,consent_version,information_accuracy_confirmed,data_processing_consent,communications_consent,consent_given,signed_name,signature_method,consent_date) VALUES($1,'test',true,true,null,true,'SIGNED TEST NAME','signature',now())`,[farmer.id]);
+  await testDb.query(`INSERT INTO farmer_verifications(farmer_id,verified_by,national_id_verified,notes) VALUES($1,'TEST OFFICER',true,'TEST VERIFICATION')`,[farmer.id]);
+  const elevatedLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'registration-review',password:registrationSecret})});
+  assert.equal(elevatedLogin.status,200);
+  const elevatedHeaders={Origin:'https://satima.example',Cookie:elevatedLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+  const elevatedSession=await (await request('/api/operations/session',{headers:elevatedHeaders})).json();assert.equal(elevatedSession.sensitive_registration,true);
+  assert.equal((await (await request('/api/operations/session',{headers:viewerHeaders})).json()).sensitive_registration,false);
+  const sensitiveResponse=await request(sensitivePath,{headers:elevatedHeaders});assert.equal(sensitiveResponse.status,200);
+  const sensitive=await sensitiveResponse.json();
+  assert.equal(sensitive.national_id,'PRIVATE-NATIONAL-ID');assert.equal(sensitive.kra_pin,'PRIVATE-KRA-PIN');
+  assert.equal(sensitive.contacts[0].full_name,'PRIVATE NEXT OF KIN');assert.equal(sensitive.payments[0].mpesa_registered_name,'PRIVATE MPESA NAME');
+  assert.equal(sensitive.consents[0].signed_name,'SIGNED TEST NAME');assert.equal(sensitive.verifications[0].verified_by,'TEST OFFICER');
+  assert.equal(sensitive.sources[0].raw_transcription.farmer_signature,'SIGNATURE TRANSCRIPTION');
+  assert(!JSON.stringify(sensitive).includes('before_record'),'Administrative audit data must not leak');
+  assert.equal((await testDb.query('SELECT count(*)::int AS count FROM farmer_sensitive_access_events WHERE farmer_id=$1',[farmer.id])).rows[0].count,1,'Only the successful elevated read is audited');
+  assert.equal((await request(sensitivePath,{method:'PUT',headers:elevatedHeaders,body:'{}'})).status,403);
+  assert.equal((await request('/api/farmers/'+farmer.id,{headers:elevatedHeaders})).status,401);
+  assert.equal((await request('/api/operations/logout',{method:'POST',headers:elevatedHeaders,body:'{}'})).status,200);
+  assert.equal((await request(sensitivePath,{headers:elevatedHeaders})).status,401);
+ }finally{await testDb.end();}
  const viewerPhoto=await request(viewerPhotoPath,{headers:viewerHeaders});assert.equal(viewerPhoto.status,200);assert.deepEqual(Buffer.from(await viewerPhoto.arrayBuffer()),replacementPhoto);
  assert.equal((await request(photoPath,{headers:viewerHeaders})).status,401);
  assert.equal((await request(viewerPhotoPath,{method:'PUT',headers:{...viewerHeaders,'Content-Type':'image/png'},body:firstPhoto})).status,403);

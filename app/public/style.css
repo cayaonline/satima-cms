@@ -211,6 +211,12 @@ main{margin-left:0}
 .filter-panel .link-button{justify-self:start;grid-column:1/-1}
 @media(max-width:600px){.toolbar{align-items:stretch}.filter-panel{grid-template-columns:1fr;gap:12px}}
 .profile-photo{margin-bottom:20px}
+.registration-details{margin-top:4px}
+.registration-details>h3{margin:0 0 16px}
+.registration-details h4{font-size:12px;margin:18px 0 10px}
+.registration-details .evidence{margin-bottom:14px}
+.registration-details .evidence>.card,.registration-details .evidence>h4,.registration-details .evidence>.muted,.registration-details .evidence>.source-list{margin-left:16px;margin-right:16px}
+.registration-transcript{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;overflow-x:auto;background:var(--cream);border:1px solid var(--line);border-radius:7px;padding:12px;font:11px/1.5 ui-monospace,SFMono-Regular,monospace}
 .profile-photo .photo-row{display:flex;align-items:flex-start;gap:22px}
 .passport-photo{display:block;width:144px;height:192px;aspect-ratio:3/4;object-fit:cover;flex:none;border:1px solid var(--line);border-radius:7px;background:#eef2eb}
 .photo-meta{max-width:320px;min-width:0;flex:1}

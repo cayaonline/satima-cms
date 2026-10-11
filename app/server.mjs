@@ -1,6 +1,6 @@
 import {SessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
-import {listOperationsFarmers,operationsFarmerDetail} from './operations-directory.mjs';
+import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -13,6 +13,10 @@ const viewerSessions=new SessionStore({ttl}),viewerAttempts=new LoginLimiter();
 const viewerUsername=process.env.VIEWER_USERNAME,viewerPasswordHash=process.env.VIEWER_PASSWORD_HASH;
 if((viewerUsername||viewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(viewerUsername||'')||!validViewerHash(viewerPasswordHash)))throw new Error('Viewer credentials must be configured together with a valid scrypt hash.');
 const viewerEnabled=!!(viewerUsername&&viewerPasswordHash);
+const registrationViewerUsername=process.env.REGISTRATION_VIEWER_USERNAME,registrationViewerPasswordHash=process.env.REGISTRATION_VIEWER_PASSWORD_HASH;
+if((registrationViewerUsername||registrationViewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(registrationViewerUsername||'')||!validViewerHash(registrationViewerPasswordHash)))throw new Error('Elevated viewer credentials must be configured together with a valid scrypt hash.');
+if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw new Error('Operations usernames must be distinct.');
+const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
@@ -24,7 +28,7 @@ function sendPhotograph(res,photo){res.writeHead(200,{'Content-Type':photo.conte
 async function body(req){let data='';for await(const b of req){data+=b;if(data.length>40000)throw new Problem(413,'Request too large.');}try{const value=JSON.parse(data);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new Problem(400,'Invalid JSON.');}}
 function cookieToken(req,name='satima_session'){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1);}
 function session(req){const token=cookieToken(req);return sessions.role(token)==='administrator'?token:null;}
-function viewerSession(req){const token=cookieToken(req,'satima_viewer_session');return viewerSessions.role(token)==='viewer'?token:null;}
+function viewerSession(req){const token=cookieToken(req,'satima_viewer_session'),role=viewerSessions.role(token);return role==='viewer'||role==='registration_viewer'?{token,role}:null;}
 setInterval(()=>{sessions.prune();viewerSessions.prune();attempts.prune();viewerAttempts.prune();},60000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
@@ -38,14 +42,16 @@ const server=http.createServer(async(req,res)=>{
  const asset=files[path]||(directoryPages.has(path)?files['/']:null)||(operationsPages.has(path)?['operations.html','text/html']:null);
  if(asset&&req.method==='GET'){const [f,mime]=asset;res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/operations/login'&&req.method==='POST'){
-  if(!viewerEnabled)throw new Problem(503,'Operations access is not configured.');
+  if(!viewerEnabled&&!registrationViewerEnabled)throw new Problem(503,'Operations access is not configured.');
   const key=req.socket.remoteAddress;
   if(!viewerAttempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
   const credentials=await body(req);
-  const validPassword=await verifyViewerPassword(credentials.password,viewerPasswordHash);
-  if(credentials.username!==viewerUsername||!validPassword)throw new Problem(401,'Incorrect username or password.');
+  const elevated=registrationViewerEnabled&&credentials.username===registrationViewerUsername;
+  const expectedHash=elevated?registrationViewerPasswordHash:viewerPasswordHash;
+  const validPassword=await verifyViewerPassword(credentials.password,expectedHash);
+  if(!validPassword||(!elevated&&credentials.username!==viewerUsername))throw new Problem(401,'Incorrect username or password.');
   viewerAttempts.clear(key);
-  const token=viewerSessions.issue(cookieToken(req,'satima_viewer_session'),'viewer');
+  const token=viewerSessions.issue(cookieToken(req,'satima_viewer_session'),elevated?'registration_viewer':'viewer');
   if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
   res.setHeader('Set-Cookie',`satima_viewer_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);
   return send(res,200,{ok:true});
@@ -59,14 +65,16 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
  }
  if(path.startsWith('/api/operations/')){
-  const token=viewerSession(req);
-  if(!token)throw new Problem(401,'Sign in to the Operations Portal.');
-  if(path==='/api/operations/session'&&req.method==='GET')return send(res,200,{role:'viewer'});
+  const viewer=viewerSession(req);
+  if(!viewer)throw new Problem(401,'Sign in to the Operations Portal.');
+  if(path==='/api/operations/session'&&req.method==='GET')return send(res,200,{role:'viewer',sensitive_registration:viewer.role==='registration_viewer'});
   if(path==='/api/operations/logout'&&req.method==='POST'){
-   viewerSessions.revoke(token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
+   viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
   }
   if(req.method!=='GET')throw new Problem(403,'Operations access is read-only.');
   if(path==='/api/operations/farmers')return send(res,200,await listOperationsFarmers(pool,url.searchParams));
+  const registrationDetail=path.match(/^\/api\/operations\/farmers\/([^/]+)\/registration$/);
+  if(registrationDetail){if(viewer.role!=='registration_viewer')throw new Problem(403,'Sensitive registration access is required.');if(!uuid.test(registrationDetail[1]))throw new Problem(400,'Invalid farmer identifier.');return send(res,200,await operationsFarmerRegistrationDetail(pool,registrationDetail[1],registrationViewerUsername));}
   const viewerPhoto=path.match(/^\/api\/operations\/farmers\/([^/]+)\/photo$/);
   if(viewerPhoto){if(!uuid.test(viewerPhoto[1]))throw new Problem(400,'Invalid farmer identifier.');return sendPhotograph(res,await readPhotograph(pool,viewerPhoto[1],true));}
   const viewerFarmer=path.match(/^\/api\/operations\/farmers\/([^/]+)$/);
