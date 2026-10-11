@@ -20,7 +20,7 @@ try{
  // Exercise migrations as an ordinary database owner with CREATEROLE, not superuser.
  await db.query('CREATE ROLE satima_admin LOGIN CREATEROLE PASSWORD '+pg.escapeLiteral(secret));
  await db.query('CREATE DATABASE satima_cms OWNER satima_admin');
- const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations-viewer',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
+ const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
  migration(env);migration(env);
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
@@ -39,7 +39,9 @@ const response=await request(route);assert.equal(response.status,200,route);asse
 assert.equal((await request('/api/farmers')).status,401);
 assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
 assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);
-const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({password:cmsSecret})});
+assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({password:cmsSecret})})).status,401,'Administrator username is required');
+assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:cmsSecret})})).status,401,'Viewer username cannot sign in as administrator');
+const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});
 assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
 const created=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'HOSTED TEST ONLY',primary_phone:'TEST-PHONE-SEARCH',registered_by:'TEST',village_area:'TEST VILLAGE',county:'TEST COUNTY',location:'TEST LOCATION',sub_location:'TEST SUBLOCATION',sub_county:'TEST SUBCOUNTY',physical_address:'TEST ADDRESS',national_id:'PRIVATE-NATIONAL-ID',kra_pin:'PRIVATE-KRA-PIN',category:'Satima Farmers',contact:{full_name:'PRIVATE NEXT OF KIN',phone_number:'PRIVATE KIN PHONE',relationship:'TEST'},payment:{mpesa_registered_name:'PRIVATE MPESA NAME',mpesa_phone_number:'PRIVATE MPESA PHONE'}})});
@@ -59,7 +61,8 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/operations/farmers')).status,401);
  assert.equal((await request('/api/operations/farmers',{headers})).status,401,'Administrator cookie is not a viewer session');
  assert.equal((await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'wrong',password:viewerSecret})})).status,401);
- const viewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations-viewer',password:viewerSecret})});
+ assert.equal((await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations-viewer',password:viewerSecret})})).status,401,'Old viewer username must be rejected');
+ const viewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  assert.equal(viewerLogin.status,200);assert.match(viewerLogin.headers.get('set-cookie'),/HttpOnly.*SameSite=Strict.*Secure/);
  const viewerHeaders={Origin:'https://satima.example',Cookie:viewerLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
  assert.equal((await request('/api/operations/session',{headers:viewerHeaders})).status,200);
@@ -81,7 +84,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/operations/farmers',{headers:viewerHeaders})).status,401);
  assert.equal((await (await request('/api/farmers?q=no-matching-column-value',{headers})).json()).stats.total,0);
  assert.equal((await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).status,400);
- const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({password:cmsSecret})});assert.equal(rotated.status,200);
+ const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(rotated.status,200);
  assert.equal((await request('/api/farmers',{headers})).status,401,'Previous login session must be revoked');
  headers.Cookie=rotated.headers.get('set-cookie').split(';')[0];
  const invalidPage=await request('/api/farmers?page=0',{headers});assert.equal(invalidPage.status,400);

@@ -52,7 +52,7 @@ const server=http.createServer(async(req,res)=>{
  const key=req.socket.remoteAddress;
  if(!attempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
  const b=await body(req);
- if(typeof b.password!=='string'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect password.');
+ if(typeof b.password!=='string'||b.username!=='admin'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect username or password.');
  attempts.clear(key);const token=sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
  }

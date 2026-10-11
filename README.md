@@ -12,7 +12,7 @@ make start
 make copy-password
 ```
 
-Open **http://127.0.0.1:3000** and paste the copied password into the login screen. `make copy-password` copies only `CMS_PASSWORD` from `.env` to your macOS clipboard; it does not print the password. Existing installation credentials are already configured. `make start` starts PostgreSQL, checks migrations, configures the separate app role and builds/starts the application.
+Open **http://127.0.0.1:3000**, enter the username `admin`, and paste the copied password into the login screen. `make copy-password` copies only `CMS_PASSWORD` from `.env` to your macOS clipboard; it does not print the password. Existing installation credentials are already configured. `make start` starts PostgreSQL, checks migrations, configures the separate app role and builds/starts the application.
 
 The directory defaults to actual registrations. Demo records remain stored and are visible in All records; they are never deleted automatically. Open a farmer to edit master/contact/payment details or see consent, verification, source transcription, change history and cleaning notes. New records default to pending verification. Marking a note resolved requires an explanation and does not silently alter consent evidence.
 
@@ -24,7 +24,7 @@ See [installation and private database transfer](docs/other-computers.md). Run `
 
 [Deploy on Render](https://render.com/deploy?repo=https://github.com/cayaonline/satima-cms) using the prepared [hosting and private data-transfer guide](docs/render-deployment.md). This uses a free Render web service and a separate Neon Free PostgreSQL database. A new deployment is empty until the private database is transferred. The eventual Render HTTPS service URL is the shared application link.
 
-The administrator CMS remains at `/`. The separate read-only [Morning Dew Operations Portal](https://satima-cms.onrender.com/operations/login) signs in at `/operations/login` and displays approved farmer information at `/operations`; it shares the same PostgreSQL database but uses a distinct viewer credential and restricted API responses. Configure the viewer credential outside Git as described in [production maintenance](docs/production-maintenance.md).
+The administrator CMS remains at `/` with username `admin`. The separate read-only [Morning Dew Operations Portal](https://satima-cms.onrender.com/operations/login) signs in as `operations` at `/operations/login` and displays approved farmer information at `/operations`; it shares the same PostgreSQL database but uses a distinct viewer password and restricted API responses. Configure the viewer credential outside Git as described in [production maintenance](docs/production-maintenance.md).
 
 ## Requirements and first start
 
