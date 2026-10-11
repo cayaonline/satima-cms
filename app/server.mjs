@@ -19,7 +19,7 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -46,8 +46,10 @@ const server=http.createServer(async(req,res)=>{
   const key=req.socket.remoteAddress;
   if(!viewerAttempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
   const credentials=await body(req);
+  if(typeof credentials.username!=='string'||!credentials.username.trim())throw new Problem(400,'Please enter your username.');
+  if(typeof credentials.password!=='string'||!credentials.password)throw new Problem(400,'Please enter your password.');
   const elevated=registrationViewerEnabled&&credentials.username===registrationViewerUsername;
-  const expectedHash=elevated?registrationViewerPasswordHash:viewerPasswordHash;
+  const expectedHash=elevated?registrationViewerPasswordHash:(viewerPasswordHash||registrationViewerPasswordHash);
   const validPassword=await verifyViewerPassword(credentials.password,expectedHash);
   if(!validPassword||(!elevated&&credentials.username!==viewerUsername))throw new Problem(401,'Incorrect username or password.');
   viewerAttempts.clear(key);
@@ -60,7 +62,10 @@ const server=http.createServer(async(req,res)=>{
  const key=req.socket.remoteAddress;
  if(!attempts.attempt(key))throw new Problem(429,'Too many attempts. Try again in 15 minutes.');
  const b=await body(req);
- if(typeof b.password!=='string'||b.username!=='admin'||!timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD)))throw new Problem(401,'Incorrect username or password.');
+ if(typeof b.username!=='string'||!b.username.trim())throw new Problem(400,'Please enter your username.');
+ if(typeof b.password!=='string'||!b.password)throw new Problem(400,'Please enter your password.');
+ const validPassword=timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD));
+ if(b.username!=='admin'||!validPassword)throw new Problem(401,'Incorrect username or password.');
  attempts.clear(key);const token=sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
  }

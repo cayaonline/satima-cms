@@ -28,17 +28,12 @@ if(stakeholderRoute){
 async function api(path,options={}){
  const response=await fetch('/api/operations'+path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
  const data=await response.json();
- if(!response.ok){if(response.status===401&&path!=='/login'&&location.pathname!=='/operations/login')location.replace('/operations/login');throw new Error(data.error||'Request failed.');}
+ if(!response.ok){if(response.status===401&&path!=='/login'&&location.pathname!=='/operations/login')location.replace('/operations/login');throw Object.assign(new Error(data.error||'Request failed.'),{status:response.status});}
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
 async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(!stakeholderRoute)await load();}catch{showLogin();}}
-$('#login-form').addEventListener('submit',async event=>{
- event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;
- try{await api('/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.target)))});event.target.reset();$('#login-error').textContent='';location.assign('/operations');}
- catch(error){$('#login-error').textContent=error.message;}
- finally{button.disabled=false;}
-});
+setupLogin(async credentials=>{await api('/login',{method:'POST',body:JSON.stringify(credentials)});location.assign('/operations');});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});location.replace('/operations/login');}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}});
 
 function genderLabel(value){return {male:'Male',female:'Female',not_verified:'Not verified'}[value]||'Not verified';}

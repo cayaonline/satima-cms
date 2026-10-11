@@ -19,6 +19,22 @@ input,select,textarea{border-radius:var(--radius);transition:border-color .15s e
 .login-form input{margin-top:8px;min-height:48px}
 .login-form .primary{min-height:48px;align-items:center}
 .login-form .error{margin:10px 0 14px}
+.login-password-group{margin-top:16px}
+.login-password-group label{margin-top:0}
+.login-password-field{position:relative}
+.login-password-field input{padding-right:54px}
+.login-password-field button{position:absolute;right:4px;top:12px;width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.login-password-field button:hover{color:var(--green);background:#f0f3ed}
+.login-password-field button:focus-visible{outline:2px solid #9ab5a0;outline-offset:1px}
+.login-password-field svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.login-password-field .eye-closed,.login-password-field button[aria-pressed="true"] .eye-open{display:none}
+.login-password-field button[aria-pressed="true"] .eye-closed{display:block}
+.login-form input[aria-invalid="true"]{border-color:#b84843;box-shadow:0 0 0 1px #b84843}
+.login-form .login-error{display:flex;align-items:flex-start;gap:8px;color:#9d3734}
+.login-error-icon{display:grid;place-items:center;flex:none;width:15px;height:15px;margin-top:2px;border:1px solid currentColor;border-radius:50%;font-size:10px;font-weight:700;line-height:1}
+.login-spinner{display:inline-block;width:16px;height:16px;border:2px solid #ffffff70;border-top-color:#fff;border-radius:50%;animation:login-spin .8s linear infinite}
+@keyframes login-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.login-spinner{animation:none}}
 .nav{min-height:46px;align-items:center;transition:background-color .15s ease;position:relative}
 .nav.active{background:#36584b;font-weight:600;box-shadow:inset 3px 0 #93b798}
 .nav.active:hover{background:#36584b}
