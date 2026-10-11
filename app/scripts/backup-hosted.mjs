@@ -4,6 +4,7 @@ import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypt
 import {createReadStream,createWriteStream} from 'node:fs';
 import {mkdir,readFile,writeFile,stat,open,rename,unlink} from 'node:fs/promises';
 import {pipeline} from 'node:stream/promises';
+import {Writable} from 'node:stream';
 import {rootCertificates} from 'node:tls';
 import {resolve} from 'node:path';
 const magic=Buffer.from('SATIMA01'),docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
@@ -37,7 +38,17 @@ async function decrypted(file){
  const decipher=createDecipheriv('aes-256-gcm',await key(),head.subarray(8));decipher.setAAD(magic);decipher.setAuthTag(tag);
  return {source:createReadStream(file,{start:20,end:size-17}),decipher};
 }
-export async function inspect(file){const {source,decipher}=await decrypted(file);await Promise.all([pipeline(source,decipher),run(['run','--rm','-i','postgres:18.6','pg_restore','--list'],process.env,decipher,null)]);}
+export async function inspect(file){
+ const {source,decipher}=await decrypted(file);
+ let prefix=Buffer.alloc(0),length=0;
+ const sink=new Writable({write(chunk,_encoding,done){
+  length+=chunk.length;
+  if(prefix.length<5)prefix=Buffer.concat([prefix,chunk.subarray(0,5-prefix.length)]);
+  done();
+ }});
+ await pipeline(source,decipher,sink); // Read through EOF to authenticate the GCM tag.
+ if(length<5||prefix.toString()!=='PGDMP')throw new Error('Backup is not a PostgreSQL custom-format archive');
+}
 export async function restoreIsolated(file,target){
  if(!/^satima-restore-test-[a-f0-9]{8}$/.test(target||''))throw new Error('Restore is restricted to a named disposable local test container');
  const {source,decipher}=await decrypted(file);
