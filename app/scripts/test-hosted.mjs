@@ -9,7 +9,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {hashViewerPassword} from '../security.mjs';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
 const name='satima-hosting-test-'+randomBytes(4).toString('hex');
-const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(14).toString('base64url').slice(0,14);
+const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(9).toString('base64url').slice(0,9);
 function crc32(bytes){let value=0xffffffff;for(const byte of bytes){value^=byte;for(let i=0;i<8;i++)value=(value>>>1)^(-(value&1)&0xedb88320);}return (value^0xffffffff)>>>0;}
 function pngChunk(type,data){const tag=Buffer.from(type),result=Buffer.alloc(data.length+12);result.writeUInt32BE(data.length);tag.copy(result,4);data.copy(result,8);result.writeUInt32BE(crc32(Buffer.concat([tag,data])),data.length+8);return result;}
 function pngPixel(r,g,b){const header=Buffer.alloc(13);header.writeUInt32BE(1,0);header.writeUInt32BE(1,4);header[8]=8;header[9]=2;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',header),pngChunk('IDAT',deflateSync(Buffer.from([0,r,g,b]))),pngChunk('IEND',Buffer.alloc(0))]);}

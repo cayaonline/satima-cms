@@ -11,7 +11,7 @@ export class SessionStore{
  issue(previous,role='administrator'){this.prune();this.revoke(previous);if(this.entries.size>=this.limit)return null;const token=randomBytes(32).toString('hex');this.entries.set(tokenHash(token),{expires:this.now()+this.ttl,role});return token;}
 }
 export async function hashViewerPassword(password,salt=randomBytes(16)){
- if(typeof password!=='string'||password.length<14)throw new Error('Viewer password must be at least 14 characters.');
+ if(typeof password!=='string'||password.length<9)throw new Error('Viewer password must be at least 9 characters.');
  const derived=await scrypt(password,salt,64,{N:16384,r:8,p:1,maxmem:32*1024*1024});
  return `scrypt$16384$8$1$${salt.toString('hex')}$${derived.toString('hex')}`;
 }

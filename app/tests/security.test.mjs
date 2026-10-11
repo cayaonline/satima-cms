@@ -8,7 +8,7 @@ test('login attempt limits are bounded and reset after the window',()=>{
  let now=0;const l=new LoginLimiter({limit:2,window:10,maxKeys:2,now:()=>now});assert(l.attempt('a'));assert(l.attempt('a'));assert(!l.attempt('a'));assert(l.attempt('b'));assert(!l.attempt('c'));l.clear('b');assert(l.attempt('c'));now=11;assert(l.attempt('a'));assert.equal(l.entries.size,1);
 });
 test('viewer credentials use a salted scrypt hash and sessions retain distinct roles',async()=>{
- await assert.rejects(hashViewerPassword('short-secret'),/at least 14 characters/);
+ await assert.rejects(hashViewerPassword('12345678'),/at least 9 characters/);
  const password='viewer-test-password-long-enough',first=await hashViewerPassword(password),second=await hashViewerPassword(password);
  assert(validViewerHash(first));assert.notEqual(first,second);assert(!first.includes(password));
  assert(await verifyViewerPassword(password,first));assert(!await verifyViewerPassword('incorrect-viewer-password',first));assert(!await verifyViewerPassword(password,'invalid'));
