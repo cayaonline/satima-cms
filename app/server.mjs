@@ -7,7 +7,7 @@ import {createHash,timingSafeEqual} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
 import {photographBody,readPhotograph,savePhotograph,removePhotograph} from './photographs.mjs';
-if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<16)throw new Error('CMS_PASSWORD must be at least 16 characters.');
+if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<9)throw new Error('CMS_PASSWORD must be at least 9 characters.');
 const ttl=8*3600*1000,sessions=new SessionStore({ttl}),attempts=new LoginLimiter();
 const viewerSessions=new SessionStore({ttl}),viewerAttempts=new LoginLimiter();
 const viewerUsername=process.env.VIEWER_USERNAME,viewerPasswordHash=process.env.VIEWER_PASSWORD_HASH;
