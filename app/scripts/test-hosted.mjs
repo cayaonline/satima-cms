@@ -35,19 +35,21 @@ try{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{const data=[];res.on('data',b=>data.push(b));res.on('end',()=>resolve(new Response(Buffer.concat(data),{status:res.statusCode,headers:res.headers})));});
   r.on('error',reject);r.end(options.body);
  });
- for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/kra-verification']){
+ for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/kra-verification']){
+ for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
- assert.match(adminPage,/<title>Satima Farmhouse · Admin<\/title>/);
- assert.match(operationsPage,/<title>Satima Farmhouse · Operations<\/title>/);
+ assert.match(adminPage,/<title>Satima Farmhouse CMS · Admin<\/title>/);
+ assert.match(operationsPage,/<title>Satima Farmhouse CMS · Operations<\/title>/);
  for(const [route,type] of [['/favicon.ico','image/x-icon'],['/favicon-32.png','image/png'],['/apple-touch-icon.png','image/png'],['/icon-192.png','image/png'],['/icon-512.png','image/png'],['/site.webmanifest','application/manifest+json']]){
   const response=await request(route);assert.equal(response.status,200,route);assert.equal(response.headers.get('content-type'),type,route);assert.ok((await response.arrayBuffer()).byteLength>0,route);
  }
 assert.equal((await request('/api/farmers')).status,401);
+ assert.equal((await request('/api/flagged-records')).status,401);
+ assert.equal((await request('/api/operations/flagged-records')).status,401);
  assert.equal((await request('/api/kra-verification')).status,401);
  assert.equal((await request('/api/operations/kra-verification')).status,401);
  assert.match((await request('/')).headers.get('content-security-policy'),/img-src 'self' data: blob:/,'Local photograph previews are permitted');
@@ -213,6 +215,30 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   const response=await request(route,{method,headers:viewerHeaders});assert([401,403].includes(response.status),method+' '+route);
  }
  assert.equal((await request('/api/farmers',{headers})).status,200,'Viewer activity must not revoke administrator session');
+ const owner=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await owner.connect();
+ try{
+  const source='f'.repeat(64);
+  for(const row of [15,21])await owner.query(`INSERT INTO farmer_master_sources(document_sha256,document_name,sheet_name,row_number,source_name,source_category,match_result)
+    VALUES($1,'test.xlsx','Table 1',$2,$3,'Satima Farmers','review_required')`,[source,row,'TEST FLAG '+row]);
+  const {rows:[another]}=await owner.query("INSERT INTO farmers(full_name,primary_phone,registered_by) VALUES('FLAG TEST CANDIDATE','TEST-FLAG-PHONE','TEST') RETURNING id");
+  const ids=[];
+  for(const [row,id] of [[15,farmer.id],[21,farmer.id],[21,another.id]]){
+   const issue=await owner.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'master_supplier_match',$2) RETURNING id",[id,'Supplier master row '+row+': Confirm identity.']);ids.push(issue.rows[0].id);
+  }
+  const adminFlags=await (await request('/api/flagged-records',{headers})).json();
+  const opsFlags=await (await request('/api/operations/flagged-records',{headers:viewerHeaders})).json();
+  assert.equal(adminFlags.total,2);assert.deepEqual(opsFlags,adminFlags);
+  assert.equal(adminFlags.records.find(r=>r.row_number===21).candidates.length,2,'Two possible farmers still count as one flagged source record');
+  assert.equal((await request('/api/operations/flagged-records',{method:'POST',headers:viewerHeaders,body:'{}'})).status,403);
+  await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[1]]);
+  assert.equal((await (await request('/api/flagged-records',{headers})).json()).total,2);
+  await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[2]]);
+  assert.equal((await (await request('/api/operations/flagged-records',{headers:viewerHeaders})).json()).total,1);
+  await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[0]]);
+  await owner.query('DELETE FROM farmer_data_issues WHERE farmer_id=$1',[another.id]);
+  await owner.query('DELETE FROM farmer_audit_events WHERE farmer_id=$1',[another.id]);
+  await owner.query('DELETE FROM farmers WHERE id=$1',[another.id]);
+ }finally{await owner.end();}
  assert.equal((await request('/api/operations/logout',{method:'POST',headers:viewerHeaders,body:'{}'})).status,200);
  assert.equal((await request('/api/operations/farmers',{headers:viewerHeaders})).status,401);
  assert.equal((await request(viewerPhotoPath,{headers:viewerHeaders})).status,401);
@@ -267,6 +293,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request(photoPath,{headers:removeHeaders})).status,404);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers:removeHeaders})).json()).has_photograph,false);
  const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+
  console.log('PASS: fresh migrations, repeat migrations, non-superuser owner, HTTPS origin, Secure cookies, login, register, edit, search, logout, SQL persistence and restricted-role protections.');
 }finally{
  if(localServer){localServer.kill('SIGTERM');await new Promise(resolve=>localServer.once('exit',resolve));}

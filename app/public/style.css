@@ -152,6 +152,12 @@ header strong{color:var(--ink);font-weight:600}
 
 .page-actions{display:flex;align-items:center;justify-content:flex-end;gap:16px;flex-wrap:wrap}.page-actions button:disabled{cursor:default}.page-actions span{white-space:nowrap}
 .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+.stat-flagged{grid-column:1/-1}
+.flagged-link{display:inline-block;color:var(--green);font-size:12px;font-weight:600;text-decoration:none}
+.flagged-link:hover{text-decoration:underline;text-underline-offset:3px}
+.flagged-table{min-width:600px!important}
+.flagged-table th{width:auto!important}
+.flagged-candidate{display:block;text-align:left;white-space:normal}
 .supplier-categories{margin:0 0 24px}
 .supplier-categories h2{font-family:inherit;font-size:16px;font-weight:600;margin:0 0 3px}
 .category-guidance{color:var(--muted);font-size:12px;margin:0 0 14px}

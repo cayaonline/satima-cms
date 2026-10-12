@@ -2,6 +2,7 @@ const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const categoryRoutes={'Satima Farmers':'/operations/category/satima','Larger Sagana Farmers':'/operations/category/larger-sagana','Kangema Farmers':'/operations/category/kangema','Others':'/operations/category/others'};
 const routeCategory=Object.entries(categoryRoutes).find(([,path])=>path===location.pathname)?.[0]||null;
+const flaggedRoute=location.pathname==='/operations/flagged-records';
 const stakeholderPages={
  '/operations/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
  '/operations/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
@@ -16,6 +17,12 @@ if(routeCategory){
  $('#page-title').textContent=routeCategory;$('#breadcrumb').textContent=routeCategory;
  $('#page-subtitle').textContent='Farmers in this supplier category.';
  $('#category-total').hidden=false;$('#category').value=routeCategory;$('#category').closest('label').hidden=true;
+}
+if(flaggedRoute){
+ $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
+ $('#page-title').textContent='Flagged Records';$('#breadcrumb').textContent='Flagged Records';
+ $('#page-subtitle').textContent='Supplier-list entries awaiting identity review.';
+ $('#stats').hidden=true;$('#directory-filters').hidden=true;
 }
 if(kraRoute){$('#farmer-content').hidden=true;$('#kra-content').hidden=false;$('#breadcrumb').textContent='KRA Verification';}
 if(stakeholderRoute){
@@ -62,11 +69,13 @@ function photoCard(farmer){return `<section class="card profile-photo"><h3>Farme
 async function load(){
  const ticket=++requestNumber,[sort,direction]=$('#sort').value.split(':');
  try{
-  const data=await api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:$('#registration').value,gender:$('#gender').value,sort,direction,page}));
+  if(flaggedRoute){const flags=await api('/flagged-records');if(ticket!==requestNumber)return;const q=$('#search').value.trim().toLowerCase(),rows=flags.records.filter(r=>!q||[r.row_number,r.source_name,r.source_category,...r.candidates.flatMap(c=>[c.customer_id,c.full_name])].some(v=>String(v||'').toLowerCase().includes(q)));$('#directory').innerHTML=rows.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Flagged supplier records"><table class="flagged-table"><thead><tr><th>Supplier row</th><th>Supplier name</th><th>Supplier category</th><th>Possible CMS matches</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.row_number)}</td><td>${esc(r.source_name)}</td><td>${esc(r.source_category)}</td><td>${r.candidates.map(c=>`<button class="link-button flagged-candidate" data-view="${esc(c.id)}">${esc(c.customer_id||'—')} · ${esc(c.full_name)}</button>`).join('')||'—'}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${rows.length} flagged ${rows.length===1?'record':'records'} shown</div>`:'<div class="empty"><h3>No flagged records found</h3></div>';return;}
+  const [data,flags]=await Promise.all([api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:$('#registration').value,gender:$('#gender').value,sort,direction,page})),api('/flagged-records')]);
   if(ticket!==requestNumber)return;
   if(page>1&&page>data.pagination.total_pages){page=Math.max(1,data.pagination.total_pages);return load();}
   if(routeCategory)$('#category-total').textContent=data.stats.total+' '+(data.stats.total===1?'farmer':'farmers')+' in '+routeCategory+'.';
   $('#stats').innerHTML=[['Total farmers',data.stats.total],['Registered',data.stats.registered],['Not registered',data.stats.not_registered]].map(([label,count])=>`<div class="stat"><span class="stat-top">${esc(label)}</span><strong>${esc(count)}</strong></div>`).join('');
+  if(!routeCategory)$('#stats').insertAdjacentHTML('beforeend',`<div class="stat stat-flagged"><span class="stat-top">Flagged Records</span><strong>${esc(flags.total)}</strong><a class="flagged-link" href="/operations/flagged-records">View Flagged Records →</a></div>`);
   if(!routeCategory)$('#category-summary').innerHTML=Object.entries(categoryRoutes).map(([name,path])=>`<a class="supplier-category" href="${path}" aria-label="View ${esc(name)} farmers"><span class="category-name">${esc(name)}</span><span class="category-arrow" aria-hidden="true">↗</span><strong>${esc(data.stats.categories[name]||0)}</strong></a>`).join('');
   const rows=data.farmers;
   $('#directory').innerHTML=rows.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Farmer directory table; scroll to view all columns and rows"><table><thead><tr><th>View</th><th>Farmer ID</th><th>Supplier Category</th><th>Farmer Name</th><th>Registration Status</th><th>Location</th><th>Phone</th><th>KRA PIN</th><th>Gender</th></tr></thead><tbody>${rows.map(farmer=>`<tr><td><button class="link-button" data-view="${esc(farmer.id)}" aria-label="View ${esc(farmer.full_name)}">View →</button></td><td class="farmer-id">${esc(farmer.customer_id||'—')}</td><td>${esc(farmer.category||'Not assigned')}</td><td><div class="farmer-cell"><button data-view="${esc(farmer.id)}">${esc(farmer.full_name)}</button></div></td><td><span class="badge">${esc(registrationLabel(farmer.registration_status))}</span></td><td>${esc(farmer.village_area||farmer.location||'Not recorded')}<br><small class="muted">${esc(farmer.county||'')}</small></td><td>${esc(farmer.primary_phone||'Not recorded')}</td><td>${esc(farmer.kra_pin||'—')}</td><td>${esc(genderLabel(farmer.gender))}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${rows.length} shown${data.pagination.total_pages>1?` · Page ${page} of ${data.pagination.total_pages}<span class="page-actions"><button class="link-button" data-page="${page-1}" ${page===1?'disabled':''}>Previous</button><button class="link-button" data-page="${page+1}" ${page>=data.pagination.total_pages?'disabled':''}>Next</button></span>`:''}</div>`:'<div class="empty"><h3>No farmers found</h3><p>Try another search or filter.</p></div>';
