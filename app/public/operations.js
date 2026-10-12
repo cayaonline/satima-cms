@@ -7,7 +7,7 @@ const stakeholderPages={
  '/operations/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
  '/operations/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
 };
-const stakeholderRoute=stakeholderPages[location.pathname];
+const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:null);
 const kraRoute=location.pathname==='/operations/kra-verification';
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;

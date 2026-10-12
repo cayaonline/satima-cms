@@ -8,7 +8,7 @@ const stakeholderPages={
  '/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
  '/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
 };
-const stakeholderRoute=stakeholderPages[location.pathname];
+const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/customers']:null);
 if(stakeholderRoute){
  $('#farmer-content').hidden=true;$('#stakeholder-content').hidden=false;
  $('#breadcrumb').textContent=stakeholderRoute.name;

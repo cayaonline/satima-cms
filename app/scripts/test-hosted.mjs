@@ -35,10 +35,10 @@ try{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{const data=[];res.on('data',b=>data.push(b));res.on('end',()=>resolve(new Response(Buffer.concat(data),{status:res.statusCode,headers:res.headers})));});
   r.on('error',reject);r.end(options.body);
  });
- for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification']){
+ for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/customers/category/current','/customers/category/lapsed','/customers/category/geographically-isolated','/customers/category/dormant','/customers/category/retired','/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification']){
+ for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
@@ -126,6 +126,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const customerDb=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await customerDb.connect();
  const customerOne=(await customerDb.query("INSERT INTO customers(full_name,physical_address,phone_number,source_sha256) VALUES('TEST ALPHA','TEST ADDRESS','0712345678',$1) RETURNING id,customer_id",['a'.repeat(64)])).rows[0];
  const customerTwo=(await customerDb.query("INSERT INTO customers(full_name,physical_address,phone_number,gender,source_sha256) VALUES('TEST BETA','SECOND ADDRESS',NULL,'female',$1) RETURNING id,customer_id",['a'.repeat(64)])).rows[0];
+ await customerDb.query('UPDATE customers SET category=$2 WHERE id=$1',[customerOne.id,'Current Customers']);
  assert.equal(customerOne.customer_id,'C0001');assert.equal(customerTwo.customer_id,'C0002');
  await assert.rejects(customerDb.query('UPDATE customers SET customer_id=$2 WHERE id=$1',[customerOne.id,'C9999']),error=>error.code==='P0001');
  await customerDb.end();
@@ -133,6 +134,14 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const operationsCustomers=await (await request('/api/operations/customers',{headers:viewerHeaders})).json();
  assert.equal(adminCustomers.total,2);assert.deepEqual(adminCustomers,operationsCustomers);
  assert.deepEqual(adminCustomers.customers.map(item=>item.customer_id),['C0001','C0002']);
+ assert.equal(adminCustomers.stats.categories['Current Customers'],1);
+ assert.equal(adminCustomers.stats.uncategorized,1);
+ assert.equal(adminCustomers.customers[0].category,'Current Customers');
+ assert.deepEqual(operationsCustomers.stats,adminCustomers.stats);
+ assert.equal((await (await request('/api/customers?category=Current%20Customers',{headers})).json()).pagination.total,1);
+ assert.equal((await (await request('/api/operations/customers?category=unassigned',{headers:viewerHeaders})).json()).pagination.total,1);
+ assert.equal((await (await request('/api/customers?q=Current%20Customers',{headers})).json()).pagination.total,1);
+ assert.equal((await request('/api/customers?category=unknown',{headers})).status,400);
  assert.equal(adminCustomers.customers[0].gender,null);
  assert.equal((await (await request('/api/customers?q=0712345678',{headers})).json()).pagination.total,1);
  assert.deepEqual((await (await request('/api/operations/customers?sort=full_name&direction=desc',{headers:viewerHeaders})).json()).customers.map(item=>item.customer_id),['C0002','C0001']);
