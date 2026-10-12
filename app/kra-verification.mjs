@@ -23,8 +23,8 @@ export async function kraHistory(pool,id){const {rows:[farmer]}=await pool.query
 export async function recordKraCheck(c,id,input,actor,sourcePortal='Admin'){
  const {rows:[farmer]}=await c.query("SELECT id,customer_id,full_name,kra_pin FROM farmers WHERE id=$1 AND record_kind='registered' FOR UPDATE",[id]);if(!farmer)throw new Problem(404,'Farmer not found.');
  if(typeof input.expected_pin!=='string'||normalizedPin(input.expected_pin)!==normalizedPin(farmer.kra_pin))throw new Problem(409,'The recorded PIN has changed. Reopen this review before saving.');
- if(pinFormat(farmer.kra_pin)!=='valid')throw new Problem(400,'Correct or review the recorded KRA PIN format before recording an official check.');
- const outcome=text(input.outcome,'Official outcome',true),method='manual_checker';if(!['verified','failed','unavailable','needs_review'].includes(outcome))throw new Problem(400,'Choose a valid outcome.');
+ const outcome=text(input.outcome,'Official outcome',true),format=pinFormat(farmer.kra_pin),method=format==='valid'?'manual_checker':'manual_review';if(!['verified','failed','unavailable','needs_review'].includes(outcome))throw new Problem(400,'Choose a valid outcome.');
+ if(format!=='valid'&&outcome!=='needs_review')throw new Problem(400,'Only Needs review can be recorded for a missing or malformed PIN.');
  const taxpayer=text(input.taxpayer_name,'Taxpayer name',false,300),pinStatus=text(input.pin_status,'PIN status',false,100),checkedBy=text(input.checked_by,'Checked by',true,150),remarks=text(input.remarks,'Remarks',false,2000),evidence=text(input.evidence_reference,'Evidence reference',false,300);
  const checkedAt=text(input.checked_at,'Verification date',true);if(!/^\d{4}-\d{2}-\d{2}$/.test(checkedAt)||Number.isNaN(Date.parse(checkedAt))||new Date(checkedAt).toISOString().slice(0,10)!==checkedAt)throw new Problem(400,'Enter a valid verification date.');
  if(outcome==='verified'&&(!taxpayer||!pinStatus))throw new Problem(400,'A verified result requires the KRA taxpayer name and PIN status.');

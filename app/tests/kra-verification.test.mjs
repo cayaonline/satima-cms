@@ -43,6 +43,9 @@ test('isolated database stores format, detects duplicates, preserves manual audi
   await c.query('SAVEPOINT duplicate_check');
   await assert.rejects(createFarmer(c,{full_name:'TEST KRA DUPLICATE',primary_phone:'TEST-KRA-3',registered_by:'TEST',kra_pin:'A987654321Z'}),error=>error.code==='23505');
   await c.query('ROLLBACK TO SAVEPOINT duplicate_check');
+  const flagged=await recordKraCheck(c,second.id,{outcome:'needs_review',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',remarks:'Malformed source PIN',expected_pin:'invalid',expected_revision:null},'operations','Operations');
+  assert.equal(flagged.outcome,'needs_review');
+  assert.equal((await c.query('SELECT method,source_portal FROM farmer_kra_verifications WHERE id=$1',[flagged.id])).rows[0].method,'manual_review');
   const result=await recordKraCheck(c,first.id,{outcome:'verified',taxpayer_name:'TEST KRA FARMER',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',expected_pin:'A987654321Z',expected_revision:null},'Administrator');
   assert.equal(result.name_match,'exact');
   const listed=await listKra(c,new URLSearchParams({q:'TEST KRA FARMER'}));assert.equal(listed.records.find(r=>r.id===first.id)?.kra_status,'verified');
