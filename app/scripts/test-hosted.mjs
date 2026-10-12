@@ -41,6 +41,12 @@ const response=await request(route);assert.equal(response.status,200,route);asse
  for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
+ const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
+ assert.match(adminPage,/<title>Satima Farmhouse · Admin<\/title>/);
+ assert.match(operationsPage,/<title>Satima Farmhouse · Operations<\/title>/);
+ for(const [route,type] of [['/favicon.ico','image/x-icon'],['/favicon-32.png','image/png'],['/apple-touch-icon.png','image/png'],['/icon-192.png','image/png'],['/icon-512.png','image/png'],['/site.webmanifest','application/manifest+json']]){
+  const response=await request(route);assert.equal(response.status,200,route);assert.equal(response.headers.get('content-type'),type,route);assert.ok((await response.arrayBuffer()).byteLength>0,route);
+ }
 assert.equal((await request('/api/farmers')).status,401);
  assert.equal((await request('/api/kra-verification')).status,401);
  assert.equal((await request('/api/operations/kra-verification')).status,401);

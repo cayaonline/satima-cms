@@ -286,3 +286,7 @@ main{margin-left:0}
 #directory .table-wrap th:nth-child(10){width:160px}
 #directory .table-wrap th:nth-child(11){width:90px}
 @media(max-width:740px){#farmer-content .heading{flex-wrap:wrap}#farmer-content .heading-actions{width:100%;justify-content:flex-start}}
+/* Keep directory and KRA column labels visible while their tables scroll. */
+.table-wrap{max-height:min(70vh,720px);overflow:auto}
+.table-wrap thead th{position:sticky;top:0;z-index:1;background:#fafbf8}
+@media(max-width:740px){.table-wrap{max-height:65vh}header .operator span{display:none}}
