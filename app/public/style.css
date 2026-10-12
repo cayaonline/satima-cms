@@ -284,3 +284,4 @@ main{margin-left:0}
 #directory .table-wrap th:nth-child(9){width:110px}
 #directory .table-wrap th:nth-child(10){width:160px}
 #directory .table-wrap th:nth-child(11){width:90px}
+@media(max-width:740px){#farmer-content .heading{flex-wrap:wrap}#farmer-content .heading-actions{width:100%;justify-content:flex-start}}
