@@ -23,7 +23,7 @@ const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/kra-verification','/customers','/distributors']);
-const operationsPages=new Set(['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
+const operationsPages=new Set(['/operations','/operations/login','/operations/kra-verification','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
 function sendPhotograph(res,photo){res.writeHead(200,{'Content-Type':photo.content_type,'Content-Length':photo.image_data.length,'X-Content-Type-Options':'nosniff'});res.end(photo.image_data);}
@@ -83,6 +83,12 @@ const server=http.createServer(async(req,res)=>{
   if(path==='/api/operations/session'&&req.method==='GET')return send(res,200,{role:'viewer',sensitive_registration:viewer.role==='registration_viewer'});
   if(path==='/api/operations/logout'&&req.method==='POST'){
    viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
+  }
+  if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
+  const operationsKra=path.match(/^\/api\/operations\/kra-verification\/([^/]+)$/);
+  if(operationsKra){if(!uuid.test(operationsKra[1]))throw new Problem(400,'Invalid farmer identifier.');
+   if(req.method==='GET')return send(res,200,await kraHistory(pool,operationsKra[1]));
+   if(req.method==='POST'){const input=await body(req),actor=viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername;return send(res,201,await transaction(c=>recordKraCheck(c,operationsKra[1],input,actor,'Operations'),actor));}
   }
   if(req.method!=='GET')throw new Problem(403,'Operations access is read-only.');
   if(path==='/api/operations/farmers')return send(res,200,await listOperationsFarmers(pool,url.searchParams));

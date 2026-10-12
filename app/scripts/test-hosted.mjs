@@ -38,11 +38,12 @@ try{
  for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']){
+ for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
 assert.equal((await request('/api/farmers')).status,401);
  assert.equal((await request('/api/kra-verification')).status,401);
+ assert.equal((await request('/api/operations/kra-verification')).status,401);
  assert.match((await request('/')).headers.get('content-security-policy'),/img-src 'self' data: blob:/,'Local photograph previews are permitted');
 assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
 assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);
@@ -62,7 +63,7 @@ assert.equal(created.status,201);const farmer=await created.json();
  const kraPath='/api/kra-verification/'+farmer.id;
  const initialKra=await (await request('/api/kra-verification',{headers})).json();assert.equal(initialKra.stats.total,1);assert.equal(initialKra.stats.invalid,1);assert.equal(initialKra.stats.verified,0);
  assert.equal(initialKra.records[0].format,'invalid');assert.equal((await request(kraPath,{headers})).status,200);
- assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify({outcome:'verified',taxpayer_name:'TEST',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST'})})).status,400);
+ assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify({outcome:'verified',taxpayer_name:'TEST',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST',expected_pin:'PRIVATE-KRA-PIN',expected_revision:null})})).status,400);
 let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal(detail.gender,'not_verified');assert.equal(detail.gender_source,null);assert.equal(detail.has_photograph,false);
  assert.equal((await (await request('/api/farmers?gender=not_verified',{headers})).json()).stats.total,1);
@@ -92,7 +93,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const blocked=await request('/api/farmers/'+farmer.id,{method:'PUT',headers,body:JSON.stringify({...detail,status:'active'})});assert.equal(blocked.status,400);assert.match((await blocked.json()).error,/Active status requires/);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers})).json()).status,'pending_verification');
  assert.deepEqual(Buffer.from(await (await request(photoPath,{headers})).arrayBuffer()),replacementPhoto,'Farmer edits preserve the photograph');
- for(const query of ['HOSTED UPDATED',farmer.customer_id,'TEST-PHONE-SEARCH','TEST VILLAGE','TEST COUNTY','TEST LOCATION','TEST SUBLOCATION','TEST SUBCOUNTY','TEST ADDRESS','Pending verification','pending_verification','No open notes']){
+ for(const query of ['HOSTED UPDATED',farmer.customer_id,'TEST-PHONE-SEARCH','PRIVATE-KRA-PIN','TEST VILLAGE','TEST COUNTY','TEST LOCATION','TEST SUBLOCATION','TEST SUBCOUNTY','TEST ADDRESS','Pending verification','pending_verification','No open notes']){
   const response=await request('/api/farmers?'+new URLSearchParams({q:query}),{headers});assert.equal(response.status,200);
   const data=await response.json();assert.equal(data.stats.total,1,'Search: '+query);assert.equal(data.farmers[0].id,farmer.id);
  }
@@ -118,13 +119,15 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/session',{headers:viewerHeaders})).status,401);
  const viewerList=await (await request('/api/operations/farmers',{headers:viewerHeaders})).json();
  assert.equal(viewerList.stats.total,1);assert.equal(viewerList.farmers[0].customer_id,farmer.customer_id);
- assert.deepEqual(Object.keys(viewerList.farmers[0]).sort(),['category','county','customer_id','full_name','gender','id','location','primary_phone','registration_date','registration_status','village_area'].sort());
+ assert.equal(viewerList.farmers[0].kra_pin,'PRIVATE-KRA-PIN');
+ assert.equal((await (await request('/api/operations/kra-verification',{headers:viewerHeaders})).json()).stats.invalid,1);
+ assert.deepEqual(Object.keys(viewerList.farmers[0]).sort(),['category','county','customer_id','full_name','gender','id','kra_pin','location','primary_phone','registration_date','registration_status','village_area'].sort());
  assert.equal(viewerList.farmers[0].gender,'male');
  assert.equal((await (await request('/api/operations/farmers?gender=male&q=Male',{headers:viewerHeaders})).json()).stats.total,1);
  assert.equal((await (await request('/api/operations/farmers?gender=female',{headers:viewerHeaders})).json()).stats.total,0);
  assert.equal((await request('/api/operations/farmers?gender=unknown',{headers:viewerHeaders})).status,400);
  const viewerDetail=await (await request('/api/operations/farmers/'+farmer.id,{headers:viewerHeaders})).json();
- assert.equal(viewerDetail.gender,'male');assert.equal(viewerDetail.has_photograph,true);
+ assert.equal(viewerDetail.gender,'male');assert.equal(viewerDetail.has_photograph,true);assert.equal(viewerDetail.kra_pin,'PRIVATE-KRA-PIN');
  assert(!Object.hasOwn(viewerDetail,'gender_source'));
  const sensitivePath='/api/operations/farmers/'+farmer.id+'/registration';
  assert.equal((await request(sensitivePath)).status,401);
@@ -176,6 +179,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   await testDb.query('DELETE FROM farmer_audit_events WHERE farmer_id=$1',[secondFarmer.id]);
   await testDb.query('DELETE FROM farmers WHERE id=$1',[secondFarmer.id]);
   const elevatedSession=await (await request('/api/operations/session',{headers:elevatedHeaders})).json();assert.equal(elevatedSession.sensitive_registration,true);
+  assert.equal((await request('/api/operations/kra-verification',{headers:elevatedHeaders})).status,200);
   assert.equal((await (await request('/api/operations/session',{headers:viewerHeaders})).json()).sensitive_registration,false);
   const sensitiveResponse=await request(sensitivePath,{headers:elevatedHeaders});assert.equal(sensitiveResponse.status,200);
   const sensitive=await sensitiveResponse.json();
@@ -194,9 +198,9 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request(photoPath,{headers:viewerHeaders})).status,401);
  assert.equal((await request(viewerPhotoPath,{method:'PUT',headers:{...viewerHeaders,'Content-Type':'image/png'},body:firstPhoto})).status,403);
  assert.equal((await request(viewerPhotoPath,{method:'DELETE',headers:viewerHeaders})).status,403);
- for(const marker of ['PRIVATE-NATIONAL-ID','PRIVATE-KRA-PIN','PRIVATE NEXT OF KIN','PRIVATE KIN PHONE','PRIVATE MPESA NAME','PRIVATE MPESA PHONE','TEST ADDRESS','TEST REVIEW ONLY','audit','payments','consents','verifications','raw_transcription'])assert(!JSON.stringify(viewerDetail).includes(marker),'Viewer leaked '+marker);
- for(const query of ['HOSTED UPDATED',farmer.customer_id,'TEST-PHONE-SEARCH','TEST VILLAGE','TEST COUNTY','TEST LOCATION'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,1,'Viewer search: '+query);
- for(const query of ['PRIVATE-NATIONAL-ID','PRIVATE-KRA-PIN','TEST ADDRESS','pending_verification','TEST REVIEW ONLY'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,0,'Viewer restricted search: '+query);
+ for(const marker of ['PRIVATE-NATIONAL-ID','PRIVATE NEXT OF KIN','PRIVATE KIN PHONE','PRIVATE MPESA NAME','PRIVATE MPESA PHONE','TEST ADDRESS','TEST REVIEW ONLY','audit','payments','consents','verifications','raw_transcription'])assert(!JSON.stringify(viewerDetail).includes(marker),'Viewer leaked '+marker);
+ for(const query of ['HOSTED UPDATED',farmer.customer_id,'TEST-PHONE-SEARCH','PRIVATE-KRA-PIN','TEST VILLAGE','TEST COUNTY','TEST LOCATION'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,1,'Viewer search: '+query);
+ for(const query of ['PRIVATE-NATIONAL-ID','TEST ADDRESS','pending_verification','TEST REVIEW ONLY'])assert.equal((await (await request('/api/operations/farmers?'+new URLSearchParams({q:query}),{headers:viewerHeaders})).json()).stats.total,0,'Viewer restricted search: '+query);
  const categoryList=await (await request('/api/operations/farmers?category=Satima%20Farmers&page_size=1&sort=full_name',{headers:viewerHeaders})).json();assert.equal(categoryList.stats.total,1);assert.equal(categoryList.pagination.page_size,1);
  assert.equal((await request('/api/operations/farmers?category=unassigned',{headers:viewerHeaders})).status,400);
  for(const [route,method] of [['/api/farmers','POST'],['/api/farmers/'+farmer.id,'PUT'],['/api/farmers/'+farmer.id+'/issues','POST'],['/api/operations/farmers','POST'],['/api/operations/farmers/'+farmer.id,'PUT'],['/api/operations/farmers/'+farmer.id,'DELETE'],['/api/operations/farmers/'+farmer.id,'PATCH']]){
@@ -210,10 +214,24 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const beforeKraEdit=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/farmers/'+farmer.id,{method:'PUT',headers,body:JSON.stringify({...beforeKraEdit,kra_pin:' p123456789a '})})).status,200);
  assert.equal((await (await request('/api/farmers?q=P123456789A',{headers})).json()).stats.total,1,'Admin directory searches PINs');
- const kraCheck={outcome:'verified',taxpayer_name:'HOSTED UPDATED',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',remarks:'Checked official site'};
+ const kraCheck={outcome:'verified',taxpayer_name:'HOSTED UPDATED',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',remarks:'Checked official site',expected_pin:'P123456789A',expected_revision:null};
  assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify(kraCheck)})).status,201);
  const checkedKra=await (await request('/api/kra-verification',{headers})).json();assert.equal(checkedKra.stats.verified,1);assert.equal(checkedKra.records[0].name_match,'exact');
  assert.equal((await (await request(kraPath,{headers})).json()).history.length,1);
+ // Both portal sessions read the same result; only the KRA POST is a viewer write exception.
+ const viewerRelogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
+ assert.equal(viewerRelogin.status,200);const kraViewerHeaders={Origin:'https://satima.example','Content-Type':'application/json',Cookie:viewerRelogin.headers.get('set-cookie').split(';')[0]};
+ const viewerKraPath='/api/operations/kra-verification/'+farmer.id;
+ assert.equal((await (await request('/api/operations/kra-verification',{headers:kraViewerHeaders})).json()).stats.verified,1);
+ const seenByViewer=await (await request(viewerKraPath,{headers:kraViewerHeaders})).json();assert.equal(seenByViewer.history[0].source_portal,'Admin');
+ const operationsCheck={...kraCheck,outcome:'needs_review',remarks:'Test review',expected_revision:seenByViewer.revision};
+ assert.equal((await request(viewerKraPath,{method:'POST',headers:kraViewerHeaders,body:JSON.stringify(operationsCheck)})).status,201);
+ const seenByAdmin=await (await request(kraPath,{headers})).json();assert.equal(seenByAdmin.history[0].outcome,'needs_review');assert.equal(seenByAdmin.history[0].source_portal,'Operations');assert.equal(seenByAdmin.history.length,2);
+ assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify({...kraCheck,expected_revision:seenByViewer.revision})})).status,409,'Stale Admin review must not replace Operations outcome');
+ assert.equal((await request(viewerKraPath,{method:'POST',headers:kraViewerHeaders,body:JSON.stringify({...operationsCheck,expected_pin:'P000000000A',expected_revision:seenByAdmin.revision})})).status,409,'Stale PIN must not be used');
+ assert.equal((await request('/api/operations/farmers/'+farmer.id,{method:'PUT',headers:kraViewerHeaders,body:'{}'})).status,403);
+ assert.equal((await request('/api/operations/logout',{method:'POST',headers:kraViewerHeaders,body:'{}'})).status,200);
+ assert.equal((await request(viewerKraPath,{headers:kraViewerHeaders})).status,401);
  assert.equal((await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).status,400);
  const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(rotated.status,200);
  assert.equal((await request('/api/farmers',{headers})).status,401,'Previous login session must be revoked');

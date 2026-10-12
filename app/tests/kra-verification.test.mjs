@@ -19,13 +19,13 @@ test('name comparison handles case, punctuation, ordering and middle names witho
 });
 test('manual check records an append-only audit row and rejects invalid PINs',async()=>{
  const farmer={id:'id',customer_id:'SF-F-0001',full_name:'Susan Maina Wakuru',kra_pin:'P123456789A'};
- const calls=[];const c={async query(sql,values){calls.push({sql,values});if(sql.includes('FROM farmers'))return {rows:[farmer]};if(sql.includes('SELECT outcome,pin_snapshot'))return {rows:[]};if(sql.includes('INSERT INTO farmer_kra_verifications'))return {rows:[{id:1,outcome:'verified',name_match:'possible'}]};throw new Error('Unexpected SQL');}};
- const input={outcome:'verified',taxpayer_name:'Susan Wakuru',pin_status:'Active',checked_at:'2026-10-12',checked_by:'Accountant',remarks:'Checked official site'};
+ const calls=[];const c={async query(sql,values){calls.push({sql,values});if(sql.includes('FROM farmers'))return {rows:[farmer]};if(sql.includes('SELECT id,outcome,pin_snapshot'))return {rows:[]};if(sql.includes('INSERT INTO farmer_kra_verifications'))return {rows:[{id:1,outcome:'verified',name_match:'possible'}]};throw new Error('Unexpected SQL');}};
+ const input={outcome:'verified',taxpayer_name:'Susan Wakuru',pin_status:'Active',checked_at:'2026-10-12',checked_by:'Accountant',remarks:'Checked official site',expected_pin:'P123456789A',expected_revision:null};
  const result=await recordKraCheck(c,'id',input,'Administrator');
  assert.equal(result.outcome,'verified');assert.equal(calls.length,3);assert(calls[2].sql.includes('INSERT INTO farmer_kra_verifications'));
  assert.equal(calls[2].values[2],'pending');assert.equal(calls[2].values[6],'possible');
  await assert.rejects(recordKraCheck(c,'id',{...input,checked_at:'2026-02-31'},'Administrator'),error=>error.status===400);
- farmer.kra_pin='BAD';await assert.rejects(recordKraCheck(c,'id',input,'Administrator'),error=>error.status===400);
+ farmer.kra_pin='BAD';await assert.rejects(recordKraCheck(c,'id',{...input,expected_pin:'BAD'},'Administrator'),error=>error.status===400);
 });
 test('verification search is parameterized and returns formats without changing PINs',async()=>{
  const queries=[];const db={async query(sql,values=[]){queries.push({sql,values});if(sql.includes('SELECT count(*)::int total,count(*) FILTER'))return {rows:[{total:2,missing:1,invalid:0,verified:0,review:1}]};if(sql.includes('SELECT count(*)::int total'))return {rows:[{total:1}]};return {rows:[{id:'id',customer_id:'SF-F-0001',full_name:'Name',kra_pin:'P123456789A',kra_pin_format:'valid',kra_status:'pending',name_match:'not_checked',pin_snapshot:null}]};}};
@@ -43,7 +43,7 @@ test('isolated database stores format, detects duplicates, preserves manual audi
   await c.query('SAVEPOINT duplicate_check');
   await assert.rejects(createFarmer(c,{full_name:'TEST KRA DUPLICATE',primary_phone:'TEST-KRA-3',registered_by:'TEST',kra_pin:'A987654321Z'}),error=>error.code==='23505');
   await c.query('ROLLBACK TO SAVEPOINT duplicate_check');
-  const result=await recordKraCheck(c,first.id,{outcome:'verified',taxpayer_name:'TEST KRA FARMER',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT'},'Administrator');
+  const result=await recordKraCheck(c,first.id,{outcome:'verified',taxpayer_name:'TEST KRA FARMER',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',expected_pin:'A987654321Z',expected_revision:null},'Administrator');
   assert.equal(result.name_match,'exact');
   const listed=await listKra(c,new URLSearchParams({q:'TEST KRA FARMER'}));assert.equal(listed.records.find(r=>r.id===first.id)?.kra_status,'verified');
   const revision=(await c.query('SELECT updated_at::text revision FROM farmers WHERE id=$1',[first.id])).rows[0].revision;
