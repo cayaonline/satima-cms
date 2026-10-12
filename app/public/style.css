@@ -265,6 +265,7 @@ main{margin-left:0}
 /* KRA review reuses the directory cards and horizontal table scrolling. */
 .heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 .heading-actions .secondary{text-decoration:none;white-space:nowrap}
+.heading-actions a.primary{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .kra-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 25px}
 .kra-stats .stat{min-height:105px}
 #kra-content .table-wrap table{min-width:980px;table-layout:auto}
