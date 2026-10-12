@@ -12,6 +12,7 @@ export function directoryQuery(params){
  const q=(params.get('q')||'').trim();if(q.length>100)throw new Problem(400,'Search must be at most 100 characters');
  const values=[],conditions=[];const bind=v=>{values.push(v);return '$'+values.length;};
  if(scope!=='all')conditions.push('f.record_kind='+bind(scope));
+ if(scope!=='all'&&review==='all')conditions.push("f.master_list_status='current'");
  if(category)conditions.push(category==='unassigned'?'f.category IS NULL':'f.category='+bind(category));
  if(registration)conditions.push('f.registration_status='+bind(registration));
  if(gender)conditions.push('f.gender='+bind(gender));

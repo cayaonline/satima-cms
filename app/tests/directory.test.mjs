@@ -26,6 +26,22 @@ test('directory validates structured filters and keeps free text parameterized',
  const defaults=directoryQuery(params({}));assert.equal(defaults.sort,'customer_id');assert.equal(defaults.direction,'asc');assert(defaults.sql.includes('::numeric asc NULLS LAST'));
  for(const o of [{page:'0'},{page:'1.5'},{page_size:'501'},{sort:'id; DROP TABLE farmers'},{direction:'other'},{scope:'unknown'},{scope:'demo'},{status:'verified'},{review:'unknown'},{category:'Unknown'},{registration:'other'},{q:'x'.repeat(101)}])assert.throws(()=>directoryQuery(params(o)),e=>e.status===400);
 });
+test('current supplier master drives both portals while historical farmers remain reviewable',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
+ const c=await pool.connect();await c.query('BEGIN');try{
+  const current=await createFarmer(c,{full_name:'ISOLATED MASTER CURRENT',primary_phone:'MASTER-CURRENT',registered_by:'TEST',category:'Satima Farmers'});
+  const historical=await createFarmer(c,{full_name:'ISOLATED MASTER HISTORICAL',primary_phone:'MASTER-HISTORICAL',registered_by:'TEST',category:'Others'});
+  await c.query("UPDATE farmers SET master_list_status='historical' WHERE id=$1",[historical.id]);
+  await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'master_supplier_list','Absent from current list')",[historical.id]);
+  for(const list of [listFarmers,listOperationsFarmers]){
+   const directory=await list(c,params({q:'ISOLATED MASTER'}));
+   assert.equal(directory.stats.total,1);assert.equal(directory.farmers[0].id,current.id);
+   assert.equal(directory.stats.categories['Satima Farmers'],1);assert.equal(directory.stats.categories.Others,0);
+  }
+  assert.equal((await listFarmers(c,params({q:'ISOLATED MASTER',scope:'all'}))).stats.total,2);
+  const review=await listFarmers(c,params({q:'ISOLATED MASTER',review:'open'}));
+  assert.equal(review.stats.total,1);assert.equal(review.farmers[0].id,historical.id);
+ }finally{await c.query('ROLLBACK');c.release();}
+});
 test('category and registration filters combine; an unregistered profile gets one Farmer ID when completed',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
   const registered=await createFarmer(c,{full_name:'ISOLATED REGISTERED',primary_phone:'TEST-REGISTERED',registered_by:'TEST',category:'Satima Farmers'});
