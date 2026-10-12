@@ -295,4 +295,5 @@ main{margin-left:0}
 /* Keep directory and KRA column labels visible while their tables scroll. */
 .table-wrap{max-height:min(70vh,720px);overflow:auto}
 .table-wrap thead th{position:sticky;top:0;z-index:1;background:#fafbf8}
+.customer-stats{margin-top:0}.customer-stats .stat{max-width:330px}.customer-sort-label{display:flex;align-items:center;gap:10px;color:var(--muted);white-space:nowrap}.customer-sort-label select{width:auto;min-width:170px}.stakeholder-directory .table-wrap table{min-width:870px}.stakeholder-directory .table-wrap td:nth-child(4){white-space:normal;min-width:260px;max-width:440px}.stakeholder-directory th button{border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;text-align:left;cursor:pointer}.stakeholder-directory th button:hover{color:var(--green)}@media(max-width:740px){.customer-stats .stat{max-width:none}.customer-sort-label{justify-content:flex-end}}
 @media(max-width:740px){.table-wrap{max-height:65vh}header .operator span{display:none}}

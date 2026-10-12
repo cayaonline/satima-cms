@@ -1,0 +1,43 @@
+window.initCustomerDirectory=function(api){
+ const host=document.querySelector('#stakeholder-content .stakeholder-directory');
+ if(host.dataset.initialized){window.customerDirectory?.load();return;}
+ host.dataset.initialized='true';
+ const content=document.querySelector('#stakeholder-content');
+ const dialog=document.querySelector('#detail-dialog');
+ const detail=document.querySelector('#detail');
+ const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+ const display=value=>value==null||value===''?'Not recorded':value;
+ let page=1,sort='customer_id',direction='asc',pending=0,timer;
+ const columns=[['','View'],['customer_id','Customer ID'],['full_name','Customer Name'],['physical_address','Address'],['phone_number','Phone Number'],['gender','Gender']];
+ const field=(label,value)=>`<div class="kv"><dt>${esc(label)}</dt><dd>${esc(display(value))}</dd></div>`;
+ content.querySelector('.heading').insertAdjacentHTML('afterend','<div class="stats customer-stats"><div class="stat"><span class="stat-top">Total customers</span><strong id="customer-total">—</strong></div></div>');
+ host.removeAttribute('aria-labelledby');
+ host.innerHTML='<div class="toolbar"><label class="search"><span>⌕</span><input id="customer-search" aria-label="Search customers" placeholder="Search any column" autocomplete="off"></label><label class="customer-sort-label">Sort by<select id="customer-sort"><option value="customer_id:asc">Customer ID</option><option value="full_name:asc">Customer Name</option><option value="physical_address:asc">Address</option><option value="phone_number:asc">Phone Number</option><option value="gender:asc">Gender</option></select></label></div><div id="customer-directory" aria-live="polite"></div>';
+ const table=host.querySelector('#customer-directory'),search=host.querySelector('#customer-search'),selector=host.querySelector('#customer-sort');
+ async function load(){
+  const ticket=++pending;
+  try{
+   const data=await api('/customers?'+new URLSearchParams({q:search.value,sort,direction,page}));
+   if(ticket!==pending)return;
+   if(page>data.pagination.total_pages){page=data.pagination.total_pages;return load();}
+   content.querySelector('#customer-total').textContent=data.total;
+   const head=columns.map(([key,label])=>`<th${key?` aria-sort="${sort===key?(direction==='asc'?'ascending':'descending'):'none'}"`:''}>${key?`<button type="button" data-sort="${key}" aria-label="Sort by ${label}">${label}${sort===key?` <span aria-hidden="true">${direction==='asc'?'↑':'↓'}</span>`:''}</button>`:label}</th>`).join('');
+   table.innerHTML=data.customers.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Customer directory table; scroll to view all columns and rows"><table><thead><tr>${head}</tr></thead><tbody>${data.customers.map(c=>`<tr><td><button class="link-button" data-customer="${esc(c.id)}">View →</button></td><td class="farmer-id">${esc(c.customer_id)}</td><td><div class="farmer-cell"><button data-customer="${esc(c.id)}">${esc(c.full_name)}</button></div></td><td>${esc(display(c.physical_address))}</td><td>${esc(display(c.phone_number))}</td><td>${esc(c.gender?c.gender[0].toUpperCase()+c.gender.slice(1):'Not specified')}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${esc(data.pagination.total)} ${data.pagination.total===1?'customer':'customers'}${data.pagination.total_pages>1?` · Page ${page} of ${data.pagination.total_pages}<span class="page-actions"><button class="link-button" data-page="${page-1}" ${page===1?'disabled':''}>Previous</button><button class="link-button" data-page="${page+1}" ${page>=data.pagination.total_pages?'disabled':''}>Next</button></span>`:''}</div>`:'<div class="empty"><h3>No customers found</h3><p>Try another search.</p></div>';
+  }catch(error){if(ticket===pending)table.innerHTML=`<div class="empty error">${esc(error.message)}</div>`;}
+ }
+ async function open(id){
+  try{const c=await api('/customers/'+encodeURIComponent(id));detail.innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(c.customer_id)}</span><h2>${esc(c.full_name)}</h2><small>Customer profile · Read-only</small></div><button class="icon-button" type="button" data-close-customer aria-label="Close customer profile">×</button></div><div class="dialog-body"><div class="card"><h3>Customer information</h3><dl>${field('Customer ID',c.customer_id)}${field('Customer Name',c.full_name)}${field('Gender',c.gender?c.gender[0].toUpperCase()+c.gender.slice(1):'Not specified')}${field('Phone Number',c.phone_number)}${field('Physical Address / Location',c.physical_address)}</dl></div></div>`;dialog.showModal();}
+  catch(error){table.innerHTML=`<div class="empty error">${esc(error.message)}</div>`;}
+ }
+ host.addEventListener('click',event=>{
+  const record=event.target.closest('[data-customer]');if(record){open(record.dataset.customer);return;}
+  const paging=event.target.closest('[data-page]');if(paging&&!paging.disabled){page=Number(paging.dataset.page);load();return;}
+  const ordering=event.target.closest('[data-sort]');if(ordering){const key=ordering.dataset.sort;direction=sort===key&&direction==='asc'?'desc':'asc';sort=key;page=1;selector.value=sort+':asc';load();}
+ });
+ detail.addEventListener('click',event=>{if(event.target.closest('[data-close-customer]'))dialog.close();});
+ search.addEventListener('input',()=>{clearTimeout(timer);page=1;timer=setTimeout(load,200);});
+ selector.addEventListener('change',()=>{[sort,direction]=selector.value.split(':');page=1;load();});
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!content.hidden)load();});
+ window.customerDirectory={load};
+ load();
+};

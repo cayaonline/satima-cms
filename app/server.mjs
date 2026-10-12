@@ -3,6 +3,7 @@ import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
 import {listFlaggedSuppliers} from './flagged-suppliers.mjs';
+import {listCustomers,customerDetail} from './customers.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -22,7 +23,7 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -86,6 +87,9 @@ const server=http.createServer(async(req,res)=>{
    viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
   }
   if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
+  if(path==='/api/operations/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
+  const viewerCustomer=path.match(/^\/api\/operations\/customers\/([^/]+)$/);
+  if(viewerCustomer&&req.method==='GET'){if(!uuid.test(viewerCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,viewerCustomer[1]));}
   if(path==='/api/operations/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
   const operationsKra=path.match(/^\/api\/operations\/kra-verification\/([^/]+)$/);
   if(operationsKra){if(!uuid.test(operationsKra[1]))throw new Problem(400,'Invalid farmer identifier.');
@@ -125,6 +129,9 @@ const server=http.createServer(async(req,res)=>{
  const archiveEntry=path.match(/^\/api\/archives\/([A-Z0-9-]+)\/entries\/([^/]+)$/);
  if(archiveEntry&&req.method==='PATCH')return send(res,200,await saveArchiveEntry(archiveEntry[1],await body(req),archiveEntry[2]));
  if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
+ if(path==='/api/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
+ const adminCustomer=path.match(/^\/api\/customers\/([^/]+)$/);
+ if(adminCustomer&&req.method==='GET'){if(!uuid.test(adminCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,adminCustomer[1]));}
  if(path==='/api/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
  if(path==='/api/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
  const kraRecord=path.match(/^\/api\/kra-verification\/([^/]+)$/);
