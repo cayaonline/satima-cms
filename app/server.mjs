@@ -1,5 +1,6 @@
 import {SessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
+import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
@@ -21,7 +22,7 @@ const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewe
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml']};
-const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/customers','/distributors']);
+const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/kra-verification','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));}
@@ -116,6 +117,12 @@ const server=http.createServer(async(req,res)=>{
  const archiveEntry=path.match(/^\/api\/archives\/([A-Z0-9-]+)\/entries\/([^/]+)$/);
  if(archiveEntry&&req.method==='PATCH')return send(res,200,await saveArchiveEntry(archiveEntry[1],await body(req),archiveEntry[2]));
  if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
+ if(path==='/api/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
+ const kraRecord=path.match(/^\/api\/kra-verification\/([^/]+)$/);
+ if(kraRecord){if(!uuid.test(kraRecord[1]))throw new Problem(400,'Invalid farmer identifier.');
+  if(req.method==='GET')return send(res,200,await kraHistory(pool,kraRecord[1]));
+  if(req.method==='POST'){const input=await body(req);return send(res,201,await transaction(c=>recordKraCheck(c,kraRecord[1],input,'Administrator'),'Administrator'));}
+ }
  if(path==='/api/farmers'&&req.method==='POST'){const b=await body(req);const f=await transaction(c=>createFarmer(c,b));return send(res,201,{id:f.id,customer_id:f.customer_id});}
  const farmerDocuments=path.match(/^\/api\/farmers\/([^/]+)\/registration-documents$/);
  if(farmerDocuments&&req.method==='GET')return send(res,200,await farmerArchiveDocuments(farmerDocuments[1]));

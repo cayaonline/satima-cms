@@ -262,3 +262,25 @@ main{margin-left:0}
 .archive-pdf-dialog:fullscreen{width:100vw;max-width:none;height:100dvh;max-height:none}
 .archive-pdf-dialog:fullscreen iframe{height:calc(100% - 72px)}
 @media(max-width:600px){.archive-document dl{grid-template-columns:1fr}.archive-batch,.archive-entry{align-items:flex-start;flex-direction:column}.archive-pdf-dialog .dialog-head h2{font-size:14px}.archive-pdf-dialog .secondary{padding:9px}}
+/* KRA review reuses the directory cards and horizontal table scrolling. */
+.heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.heading-actions .secondary{text-decoration:none;white-space:nowrap}
+.kra-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0 25px}
+.kra-stats .stat{min-height:105px}
+#kra-content .table-wrap table{min-width:980px;table-layout:auto}
+#kra-content .table-wrap th,#kra-content .table-wrap td{width:auto;white-space:normal;overflow-wrap:anywhere}
+#kra-content .table-wrap th:nth-child(1){min-width:115px}
+#kra-content .table-wrap th:nth-child(2){min-width:185px}
+#kra-content .table-wrap th:nth-child(3){min-width:145px}
+#kra-content .table-wrap th:nth-child(7){min-width:115px}
+#kra-dialog{width:min(760px,94vw)}
+#kra-form label{display:block}
+#kra-form .form-grid{margin:16px 0}
+@media(max-width:740px){.kra-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.heading-actions{justify-content:flex-start}.heading-actions .secondary{font-size:11px;padding:10px}}
+@media(max-width:400px){.kra-stats .stat{padding:12px}.kra-stats .stat strong{font-size:26px}}
+/* Shift directory sizing to account for the KRA PIN column after Phone. */
+#directory .table-wrap table{min-width:1390px}
+#directory .table-wrap th:nth-child(8){width:150px}
+#directory .table-wrap th:nth-child(9){width:110px}
+#directory .table-wrap th:nth-child(10){width:160px}
+#directory .table-wrap th:nth-child(11){width:90px}

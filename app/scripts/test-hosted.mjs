@@ -35,13 +35,14 @@ try{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{const data=[];res.on('data',b=>data.push(b));res.on('end',()=>resolve(new Response(Buffer.concat(data),{status:res.statusCode,headers:res.headers})));});
   r.on('error',reject);r.end(options.body);
  });
- for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization']){
+ for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/kra-verification']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
  for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
 assert.equal((await request('/api/farmers')).status,401);
+ assert.equal((await request('/api/kra-verification')).status,401);
  assert.match((await request('/')).headers.get('content-security-policy'),/img-src 'self' data: blob:/,'Local photograph previews are permitted');
 assert.equal((await fetch('http://127.0.0.1:31987/')).status,403);
 assert.equal((await request('/api/login',{method:'POST',headers:{Origin:'http://satima.example'},body:'{}'})).status,403);
@@ -58,6 +59,10 @@ assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; S
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
 const created=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'HOSTED TEST ONLY',primary_phone:'TEST-PHONE-SEARCH',registered_by:'TEST',village_area:'TEST VILLAGE',county:'TEST COUNTY',location:'TEST LOCATION',sub_location:'TEST SUBLOCATION',sub_county:'TEST SUBCOUNTY',physical_address:'TEST ADDRESS',national_id:'PRIVATE-NATIONAL-ID',kra_pin:'PRIVATE-KRA-PIN',category:'Satima Farmers',contact:{full_name:'PRIVATE NEXT OF KIN',phone_number:'PRIVATE KIN PHONE',relationship:'TEST'},payment:{mpesa_registered_name:'PRIVATE MPESA NAME',mpesa_phone_number:'PRIVATE MPESA PHONE'}})});
 assert.equal(created.status,201);const farmer=await created.json();
+ const kraPath='/api/kra-verification/'+farmer.id;
+ const initialKra=await (await request('/api/kra-verification',{headers})).json();assert.equal(initialKra.stats.total,1);assert.equal(initialKra.stats.invalid,1);assert.equal(initialKra.stats.verified,0);
+ assert.equal(initialKra.records[0].format,'invalid');assert.equal((await request(kraPath,{headers})).status,200);
+ assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify({outcome:'verified',taxpayer_name:'TEST',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST'})})).status,400);
 let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal(detail.gender,'not_verified');assert.equal(detail.gender_source,null);assert.equal(detail.has_photograph,false);
  assert.equal((await (await request('/api/farmers?gender=not_verified',{headers})).json()).stats.total,1);
@@ -107,6 +112,8 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const viewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  assert.equal(viewerLogin.status,200);assert.match(viewerLogin.headers.get('set-cookie'),/HttpOnly.*SameSite=Strict.*Secure/);
  const viewerHeaders={Origin:'https://satima.example',Cookie:viewerLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+ assert.equal((await request('/api/kra-verification',{headers:viewerHeaders})).status,401);
+ assert.equal((await request(kraPath,{method:'POST',headers:viewerHeaders,body:'{}'})).status,401);
  assert.equal((await request('/api/operations/session',{headers:viewerHeaders})).status,200);
  assert.equal((await request('/api/session',{headers:viewerHeaders})).status,401);
  const viewerList=await (await request('/api/operations/farmers',{headers:viewerHeaders})).json();
@@ -200,6 +207,13 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/operations/farmers',{headers:viewerHeaders})).status,401);
  assert.equal((await request(viewerPhotoPath,{headers:viewerHeaders})).status,401);
  assert.equal((await (await request('/api/farmers?q=no-matching-column-value',{headers})).json()).stats.total,0);
+ const beforeKraEdit=await (await request('/api/farmers/'+farmer.id,{headers})).json();
+ assert.equal((await request('/api/farmers/'+farmer.id,{method:'PUT',headers,body:JSON.stringify({...beforeKraEdit,kra_pin:' p123456789a '})})).status,200);
+ assert.equal((await (await request('/api/farmers?q=P123456789A',{headers})).json()).stats.total,1,'Admin directory searches PINs');
+ const kraCheck={outcome:'verified',taxpayer_name:'HOSTED UPDATED',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',remarks:'Checked official site'};
+ assert.equal((await request(kraPath,{method:'POST',headers,body:JSON.stringify(kraCheck)})).status,201);
+ const checkedKra=await (await request('/api/kra-verification',{headers})).json();assert.equal(checkedKra.stats.verified,1);assert.equal(checkedKra.records[0].name_match,'exact');
+ assert.equal((await (await request(kraPath,{headers})).json()).history.length,1);
  assert.equal((await request('/api/farmers?scope=demo&q=TEST%20COUNTY',{headers})).status,400);
  const rotated=await request('/api/login',{method:'POST',headers,body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(rotated.status,200);
  assert.equal((await request('/api/farmers',{headers})).status,401,'Previous login session must be revoked');
@@ -228,7 +242,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await fetch(localBase+photoPath,{method:'DELETE',headers:localHeaders})).status,200);
  assert.equal((await request(photoPath,{headers:removeHeaders})).status,404);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers:removeHeaders})).json()).has_photograph,false);
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
  console.log('PASS: fresh migrations, repeat migrations, non-superuser owner, HTTPS origin, Secure cookies, login, register, edit, search, logout, SQL persistence and restricted-role protections.');
 }finally{
  if(localServer){localServer.kill('SIGTERM');await new Promise(resolve=>localServer.once('exit',resolve));}
