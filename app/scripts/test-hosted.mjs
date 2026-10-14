@@ -48,6 +48,16 @@ const response=await request(route);assert.equal(response.status,200,route);asse
    assert.match(await response.text(),/id="kra-page-title"/,route);
   }
  }
+ for(const base of ['/milk-collection','/operations/milk-collection']){
+  for(const slug of ['satima','larger-sagana','kangema','others']){
+   const route=base+'/category/'+slug,response=await request(route);
+   assert.equal(response.status,200,route);
+   assert.match(await response.text(),/id="milk-content"/,route);
+  }
+  const route=base+'/awaiting-categorisation',response=await request(route);
+  assert.equal(response.status,200,route);
+  assert.match(await response.text(),/id="milk-content"/,route);
+ }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
  assert.match(adminPage,/<title>Satima Farmhouse CMS · Admin<\/title>/);
  assert.match(operationsPage,/<title>Satima Farmhouse CMS · Operations<\/title>/);
@@ -176,6 +186,9 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  const adminMilk=await request('/api/milk-collections',{method:'POST',headers:milkHeaders(headers,'0.75',randomUUID()),body:milkImage});assert.equal(adminMilk.status,201);
  const secondMilk=await adminMilk.json();assert.notEqual(secondMilk.collection_id,firstMilk.collection_id);
  const bothMilk=await (await request('/api/milk-collections',{headers})).json();assert.equal(bothMilk.pagination.total,2);assert.equal(bothMilk.total_liters,'1.250000');
+ const milkCategories=(await (await request('/api/milk-collections/summary',{headers})).json()).categories;
+ assert.equal(milkCategories.find(item=>item.category==='Satima Farmers').deliveries,2);
+ assert.deepEqual((await (await request('/api/operations/milk-collections/summary',{headers:viewerHeaders})).json()).categories,milkCategories);
  assert.equal((await (await request('/api/operations/milk-collections',{headers:viewerHeaders})).json()).pagination.total,2);
  assert.equal((await (await request('/api/milk-collections?period=today&farmer='+farmer.id,{headers})).json()).pagination.total,2);
  assert.equal((await (await request('/api/milk-collections?q='+firstMilk.collection_id+'&category='+encodeURIComponent('Satima Farmers')+'&sort=quantity_asc',{headers})).json()).pagination.total,1);
@@ -365,7 +378,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await fetch(localBase+photoPath,{method:'DELETE',headers:localHeaders})).status,200);
  assert.equal((await request(photoPath,{headers:removeHeaders})).status,404);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers:removeHeaders})).json()).has_photograph,false);
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
 
  console.log('PASS: fresh migrations, repeat migrations, non-superuser owner, HTTPS origin, Secure cookies, login, register, edit, search, logout, SQL persistence and restricted-role protections.');
 }finally{

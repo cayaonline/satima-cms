@@ -8,7 +8,7 @@ const stakeholderPages={
  '/operations/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
 };
 const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:null);
-const milkRoute=location.pathname==='/operations/milk-collection';
+const milkRoute=window.milkUI.route(location.pathname,'/operations/milk-collection');
 const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
@@ -32,7 +32,7 @@ if(stakeholderRoute){
  for(const [id,value] of [['stakeholder-label',stakeholderRoute.label],['stakeholder-title',stakeholderRoute.title],['stakeholder-description',stakeholderRoute.description],['stakeholder-empty-title',stakeholderRoute.empty],['stakeholder-empty-description',stakeholderRoute.emptyDescription]])$('#'+id).textContent=value;
  document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===stakeholderRoute.name.toLowerCase();link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
 }
-if(milkRoute){$('#farmer-content').hidden=true;$('#milk-content').hidden=false;$('#breadcrumb').textContent='Milk Collection';document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav==='milk';link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
+if(milkRoute){$('#farmer-content').hidden=true;$('#milk-content').hidden=false;$('#breadcrumb').textContent=milkRoute.name;document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav==='milk';link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
 
 async function api(path,options={}){
  const response=await fetch('/api/operations'+path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
@@ -41,7 +41,7 @@ async function api(path,options={}){
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkRoute)window.initMilkCollection(api,true);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
+async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
 setupLogin(async credentials=>{await api('/login',{method:'POST',body:JSON.stringify(credentials)});location.assign('/operations');});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});location.replace('/operations/login');}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}});
 

@@ -31,6 +31,12 @@ for(const bucket of ['all','verified','pending','invalid','missing','review']){
  directoryPages.add('/farmers/kra-verification/'+bucket);
  operationsPages.add('/operations/kra-verification/'+bucket);
 }
+for(const slug of ['satima','larger-sagana','kangema','others']){
+ directoryPages.add('/milk-collection/category/'+slug);
+ operationsPages.add('/operations/milk-collection/category/'+slug);
+}
+directoryPages.add('/milk-collection/awaiting-categorisation');
+operationsPages.add('/operations/milk-collection/awaiting-categorisation');
 for(const slug of Object.keys(customerCategoryRoutes)){
  directoryPages.add('/customers/category/'+slug);
  operationsPages.add('/operations/customers/category/'+slug);
