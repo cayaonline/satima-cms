@@ -9,7 +9,7 @@ const stakeholderPages={
 };
 const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:null);
 const milkRoute=location.pathname==='/operations/milk-collection';
-const kraRoute=location.pathname==='/operations/kra-verification';
+const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
 
@@ -25,7 +25,7 @@ if(flaggedRoute){
  $('#page-subtitle').textContent='Supplier-list entries awaiting identity review.';
  $('#stats').hidden=true;$('#directory-filters').hidden=true;
 }
-if(kraRoute){$('#farmer-content').hidden=true;$('#kra-content').hidden=false;$('#breadcrumb').textContent='KRA Verification';}
+if(kraRoute){$('#farmer-content').hidden=true;$('#kra-content').hidden=false;$('#breadcrumb').textContent=kraRoute.title;if(kraRoute.filtered){$('#kra-stats').hidden=true;$('#kra-back').href=kraBase;$('#kra-back').textContent='← Back to KRA Verification';$('#kra-page-label').textContent='KRA VERIFICATION';$('#kra-page-title').textContent=kraRoute.title;$('#kra-page-subtitle').textContent='Farmers in this KRA verification group.';$('#kra-category-total').hidden=false;}}
 if(stakeholderRoute){
  $('#farmer-content').hidden=true;$('#stakeholder-content').hidden=false;
  $('#breadcrumb').textContent=stakeholderRoute.name;
@@ -112,10 +112,11 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#directo
 function showToast(message){$('#toast').textContent=message;$('#toast').hidden=false;}
 $('#kra-dialog').addEventListener('click',event=>{if(event.target===$('#kra-dialog'))$('#kra-dialog').close();});
 $('#kra-dialog [data-close]').addEventListener('click',()=>$('#kra-dialog').close());
-let kraPage=1,kraCurrent=null,kraDebounce,kraBucket='all',kraRequest=0;
+let kraPage=1,kraCurrent=null,kraDebounce,kraBucket=kraRoute?.bucket||'all',kraRequest=0;
 const kraLabel={verified:'Verified',pending:'Pending',failed:'Failed',unavailable:'Unavailable',needs_review:'Needs review',exact:'Exact Match',possible:'Possible Match — Requires Review',mismatch:'Mismatch',not_checked:'Not Checked',valid:'Valid',invalid:'Invalid',missing:'Missing'};
 async function loadKra(){if(!kraRoute)return;const request=++kraRequest;try{const data=await api('/kra-verification?'+new URLSearchParams({q:$('#kra-search').value,page:kraPage,bucket:kraBucket}));if(request!==kraRequest)return;const s=data.stats;
- $('#kra-stats').innerHTML=window.kraUI.cards(s,kraBucket);
+ if(kraRoute.filtered){const count=s[kraBucket==='all'?'total':kraBucket];$('#kra-category-total').textContent=count+' '+(count===1?'farmer':'farmers')+' in this selection.';}
+ else $('#kra-stats').innerHTML=window.kraUI.cards(s,kraBase);
  $('#kra-table').innerHTML=window.kraUI.table(data,kraPage);
  }catch(error){if(request===kraRequest)$('#kra-table').innerHTML=`<p class="error">${esc(error.message)}</p>`;}}
 async function openKra(id){try{kraCurrent=await api('/kra-verification/'+id);const f=kraCurrent.farmer;$('#kra-dialog-title').textContent=(f.customer_id||'Farmer')+' · '+f.full_name;$('#kra-record').innerHTML=`<div class="card"><dl>${field('Recorded KRA PIN',f.kra_pin||'—')}${field('Format',kraLabel[kraCurrent.format])}</dl></div>`;
@@ -123,7 +124,7 @@ async function openKra(id){try{kraCurrent=await api('/kra-verification/'+id);con
  $('#kra-form').reset();for(const option of $('#kra-form [name="outcome"]').options)option.disabled=kraCurrent.format!=='valid'&&option.value!==''&&option.value!=='needs_review';if(kraCurrent.format!=='valid')$('#kra-form [name="outcome"]').value='needs_review';$('#kra-form [name="checked_at"]').value=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Nairobi'});window.kraUI.restorePinStatus($('#kra-form'),kraCurrent);$('#kra-form-error').textContent='';$('#kra-dialog').showModal();
  }catch(error){showToast(error.message);}}
 $('#kra-search').addEventListener('input',()=>{clearTimeout(kraDebounce);kraPage=1;kraDebounce=setTimeout(loadKra,200);});
-document.addEventListener('click',event=>{const bucket=event.target.closest('[data-kra-bucket]'),review=event.target.closest('[data-kra-review]'),paging=event.target.closest('[data-kra-page]');if(bucket){kraBucket=bucket.dataset.kraBucket;kraPage=1;loadKra();}if(review)openKra(review.dataset.kraReview);if(paging&&!paging.disabled){kraPage=Number(paging.dataset.kraPage);loadKra();}});
+document.addEventListener('click',event=>{const review=event.target.closest('[data-kra-review]'),paging=event.target.closest('[data-kra-page]');if(review)openKra(review.dataset.kraReview);if(paging&&!paging.disabled){kraPage=Number(paging.dataset.kraPage);loadKra();}});
 $('#kra-form').addEventListener('submit',async event=>{event.preventDefault();if(!kraCurrent)return;const form=event.target,save=$('#kra-save');save.disabled=true;$('#kra-form-error').textContent='';try{await api('/kra-verification/'+kraCurrent.farmer.id,{method:'POST',body:JSON.stringify({...Object.fromEntries(new FormData(form)),expected_pin:kraCurrent.farmer.kra_pin||'',expected_revision:kraCurrent.revision})});$('#kra-dialog').close();showToast('KRA verification record saved');await loadKra();}catch(error){$('#kra-form-error').textContent=error.message;}finally{save.disabled=false;}});
 document.addEventListener('visibilitychange',()=>{if(kraRoute&&!document.hidden&&!$('#workspace').hidden&&!$('#kra-dialog').open)loadKra();});
 setInterval(()=>{if(kraRoute&&!document.hidden&&!$('#workspace').hidden&&!$('#kra-dialog').open)loadKra();},15000);

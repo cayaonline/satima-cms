@@ -6,11 +6,14 @@ import {normalizedPin,pinFormat,compareNames,officialCheck,recordKraCheck,listKr
 import {pool,createFarmer,updateFarmer} from '../store.mjs';
 after(()=>pool.end());
 
-test('shared KRA UI renders interactive filters, first-column actions, and restores saved PIN status',()=>{
+test('shared KRA UI renders dedicated category links, first-column actions, and restores saved PIN status',()=>{
  const browser={};runInNewContext(readFileSync(new URL('../public/kra-ui.js',import.meta.url),'utf8'),{window:browser});
- const cards=browser.kraUI.cards({total:23,verified:2,pending:21,invalid:2,missing:6,review:8},'missing');
- assert.equal((cards.match(/data-kra-bucket=/g)||[]).length,6);
- assert.match(cards,/data-kra-bucket="missing" aria-pressed="true"/);
+ const cards=browser.kraUI.cards({total:23,verified:2,pending:21,invalid:2,missing:6,review:8},'/farmers/kra-verification');
+ assert.equal((cards.match(/class="stat kra-stat"/g)||[]).length,6);
+ assert.match(cards,/href="\/farmers\/kra-verification\/missing"/);
+ assert.equal(browser.kraUI.route('/farmers/kra-verification/missing','/farmers/kra-verification').bucket,'missing');
+ assert.equal(browser.kraUI.route('/operations/kra-verification/verified','/operations/kra-verification').title,'PINs verified with KRA');
+ assert.equal(browser.kraUI.route('/farmers/kra-verification/unknown','/farmers/kra-verification'),null);
  const table=browser.kraUI.table({records:[{id:'one',customer_id:'SF-F-0001',full_name:'Farmer',kra_pin:'P123456789A',format:'valid',kra_status:'verified',name_match:'exact'}],pagination:{total:1,total_pages:1}},1);
  assert.match(table,/<th>Action<\/th><th>Farmer ID<\/th>/);
  assert.match(table,/<td><button class="link-button" data-kra-review="one">Review \/ Verify<\/button><\/td>/);

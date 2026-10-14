@@ -27,6 +27,10 @@ const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secu
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
+for(const bucket of ['all','verified','pending','invalid','missing','review']){
+ directoryPages.add('/farmers/kra-verification/'+bucket);
+ operationsPages.add('/operations/kra-verification/'+bucket);
+}
 for(const slug of Object.keys(customerCategoryRoutes)){
  directoryPages.add('/customers/category/'+slug);
  operationsPages.add('/operations/customers/category/'+slug);

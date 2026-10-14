@@ -41,6 +41,13 @@ const response=await request(route);assert.equal(response.status,200,route);asse
  for(const route of ['/operations','/operations/login','/operations/milk-collection','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
+ for(const base of ['/farmers/kra-verification','/operations/kra-verification']){
+  for(const bucket of ['all','verified','pending','invalid','missing','review']){
+   const route=base+'/'+bucket,response=await request(route);
+   assert.equal(response.status,200,route);
+   assert.match(await response.text(),/id="kra-page-title"/,route);
+  }
+ }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
  assert.match(adminPage,/<title>Satima Farmhouse CMS · Admin<\/title>/);
  assert.match(operationsPage,/<title>Satima Farmhouse CMS · Operations<\/title>/);
