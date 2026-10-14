@@ -1,6 +1,6 @@
 // Uses a disposable PostgreSQL container; never connects to the local CMS database.
 import {spawnSync,spawn} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import http from 'node:http';
@@ -35,10 +35,10 @@ try{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{const data=[];res.on('data',b=>data.push(b));res.on('end',()=>resolve(new Response(Buffer.concat(data),{status:res.statusCode,headers:res.headers})));});
   r.on('error',reject);r.end(options.body);
  });
- for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/customers/category/current','/customers/category/lapsed','/customers/category/geographically-isolated','/customers/category/dormant','/customers/category/retired','/customers/awaiting-categorisation']){
+ for(const route of ['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers/category/current','/customers/category/lapsed','/customers/category/geographically-isolated','/customers/category/dormant','/customers/category/retired','/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- for(const route of ['/operations','/operations/login','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
+ for(const route of ['/operations','/operations/login','/operations/milk-collection','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
@@ -52,6 +52,8 @@ assert.equal((await request('/api/farmers')).status,401);
  assert.equal((await request('/api/operations/flagged-records')).status,401);
 assert.equal((await request('/api/customers')).status,401);
 assert.equal((await request('/api/operations/customers')).status,401);
+assert.equal((await request('/api/milk-collections')).status,401);
+assert.equal((await request('/api/operations/milk-collections')).status,401);
  assert.equal((await request('/api/kra-verification')).status,401);
  assert.equal((await request('/api/operations/kra-verification')).status,401);
  assert.match((await request('/')).headers.get('content-security-policy'),/img-src 'self' data: blob:/,'Local photograph previews are permitted');
@@ -149,6 +151,36 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/customers/'+customerOne.id,{headers})).status,200);
  assert.equal((await request('/api/operations/customers/'+customerOne.id,{headers:viewerHeaders})).status,200);
  assert.equal((await request('/api/operations/customers/'+customerOne.id,{method:'PUT',headers:viewerHeaders,body:'{}'})).status,403);
+ const milkDay=(()=>{const p=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Africa/Nairobi',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));return `${p.year}-${p.month}-${p.day}`;})();
+ const milkImage=pngPixel(33,110,71),milkKey=randomUUID();
+ const milkHeaders=(session,quantity,key,date=milkDay)=>({...session,'Content-Type':'image/png','X-Farmer-Id':farmer.id,'X-Quantity-Liters':quantity,'X-Date-Received':date,'X-Idempotency-Key':key});
+ const emptyMilk=await (await request('/api/milk-collections/summary',{headers})).json();
+ assert.equal(emptyMilk.totals.today_liters,'0');
+ assert.equal(emptyMilk.daily.length,30);assert.equal(emptyMilk.weekly.length,12);assert.equal(emptyMilk.monthly.length,12);
+ assert.ok(emptyMilk.daily.every(day=>Number(day.liters)===0));
+ assert.equal((await (await request('/api/operations/milk-collections/farmers?q=HOSTED',{headers:viewerHeaders})).json())[0].id,farmer.id);
+ assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0',randomUUID()),body:milkImage})).status,400);
+ assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',randomUUID(),'2030-01-01'),body:milkImage})).status,400);
+ assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',randomUUID()),body:Buffer.from('not an image')})).status,400);
+ const milkSaved=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:milkImage});assert.equal(milkSaved.status,201);
+ const firstMilk=await milkSaved.json();assert.match(firstMilk.collection_id,/^MC\d{6}$/);
+ const milkRepeat=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:milkImage});assert.equal(milkRepeat.status,200);assert.equal((await milkRepeat.json()).id,firstMilk.id);
+ assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.75',milkKey),body:milkImage})).status,409);
+ const adminMilk=await request('/api/milk-collections',{method:'POST',headers:milkHeaders(headers,'0.75',randomUUID()),body:milkImage});assert.equal(adminMilk.status,201);
+ const secondMilk=await adminMilk.json();assert.notEqual(secondMilk.collection_id,firstMilk.collection_id);
+ const bothMilk=await (await request('/api/milk-collections',{headers})).json();assert.equal(bothMilk.pagination.total,2);assert.equal(bothMilk.total_liters,'1.250000');
+ assert.equal((await (await request('/api/operations/milk-collections',{headers:viewerHeaders})).json()).pagination.total,2);
+ assert.equal((await (await request('/api/milk-collections?period=today&farmer='+farmer.id,{headers})).json()).pagination.total,2);
+ assert.equal((await (await request('/api/milk-collections?q='+firstMilk.collection_id+'&category='+encodeURIComponent('Satima Farmers')+'&sort=quantity_asc',{headers})).json()).pagination.total,1);
+ assert.equal((await (await request('/api/operations/milk-collections/summary',{headers:viewerHeaders})).json()).totals.farmers_today,1);
+ assert.equal((await (await request('/api/operations/farmers/'+farmer.id+'/milk-collections',{headers:viewerHeaders})).json()).totals.deliveries,2);
+ assert.equal((await (await request('/api/milk-collections/'+firstMilk.id,{headers})).json()).farmer_id,farmer.id);
+ const milkPhotoResponse=await request('/api/operations/milk-collections/'+firstMilk.id+'/photo',{headers:viewerHeaders});
+ assert.equal(milkPhotoResponse.headers.get('cache-control'),'private, no-store');
+ assert.deepEqual(Buffer.from(await milkPhotoResponse.arrayBuffer()),milkImage);
+ assert.equal((await request('/api/operations/milk-collections/'+firstMilk.id+'/photo')).status,401);
+ assert.equal((await request('/api/operations/milk-collections/'+firstMilk.id,{method:'DELETE',headers:viewerHeaders})).status,403);
+ assert.equal((await request('/api/operations/farmers',{method:'POST',headers:viewerHeaders,body:'{}'})).status,403);
  assert.equal((await request('/api/kra-verification',{headers:viewerHeaders})).status,401);
  assert.equal((await request(kraPath,{method:'POST',headers:viewerHeaders,body:'{}'})).status,401);
  assert.equal((await request('/api/operations/session',{headers:viewerHeaders})).status,200);
