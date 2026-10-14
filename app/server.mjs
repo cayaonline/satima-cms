@@ -5,6 +5,7 @@ import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistratio
 import {listFlaggedSuppliers} from './flagged-suppliers.mjs';
 import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.mjs';
 import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
+import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,operationAudit} from './milk-operations.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -24,9 +25,13 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
+for(const page of ['/milk-processing','/milk-distribution']){directoryPages.add(page);operationsPages.add('/operations'+page);}
+for(const page of ['/milk-processing/new','/milk-distribution/new']){directoryPages.add(page);operationsPages.add('/operations'+page);}
+for(const slug of ['satima','larger-sagana','kangema','others']){directoryPages.add('/milk-processing/category/'+slug);operationsPages.add('/operations/milk-processing/category/'+slug);}
+directoryPages.add('/milk-processing/awaiting-categorisation');operationsPages.add('/operations/milk-processing/awaiting-categorisation');
 for(const bucket of ['all','verified','pending','invalid','missing','review']){
  directoryPages.add('/farmers/kra-verification/'+bucket);
  operationsPages.add('/operations/kra-verification/'+bucket);
@@ -63,6 +68,34 @@ async function milkRoutes(req,res,path,url,base,actor,portal){
  if(history&&req.method==='GET'){send(res,200,await farmerMilkHistory(pool,history[1]));return true;}
  return false;
 }
+async function operationalRoutes(req,res,path,url,base,actor,portal){
+ const prefix=base.replace(/\/milk-processing$/,'');
+ if(path===base+'/summary'&&req.method==='GET')return send(res,200,await processingSummary(pool,url.searchParams)),true;
+ if(path===base+'/collections'&&req.method==='GET')return send(res,200,await listProcessing(pool,url.searchParams)),true;
+ const collection=path.match(new RegExp('^'+base+'/collections/([a-f0-9-]+)$','i'));
+ if(collection&&req.method==='GET')return send(res,200,await processingDetail(pool,collection[1])),true;
+ if(path===base+'/quality'&&req.method==='POST'){const input=await body(req),saved=await transaction(c=>saveQuality(c,input,actor,portal),actor);return send(res,saved.already_saved?200:201,saved),true;}
+ const quality=path.match(new RegExp('^'+base+'/quality/([a-f0-9-]+)$','i'));
+ if(quality&&req.method==='PUT'){const input=await body(req);return send(res,200,await transaction(c=>saveQuality(c,input,actor,portal,quality[1]),actor)),true;}
+ if(path===base+'/batches'&&req.method==='GET')return send(res,200,await listBatches(pool,url.searchParams)),true;
+ if(path===base+'/batches'&&req.method==='POST'){const input=await body(req),saved=await transaction(c=>saveBatch(c,input,actor,portal),actor);return send(res,saved.already_saved?200:201,saved),true;}
+ const batch=path.match(new RegExp('^'+base+'/batches/([a-f0-9-]+)$','i'));
+ if(batch&&req.method==='GET')return send(res,200,await batchDetail(pool,batch[1])),true;
+ const farmer=path.match(new RegExp('^'+prefix+'/farmers/([a-f0-9-]+)/milk-processing$','i'));
+ if(farmer&&req.method==='GET')return send(res,200,await farmerProcessingHistory(pool,farmer[1])),true;
+ const distributionBase=prefix+'/milk-distribution';
+ if(path===distributionBase+'/summary'&&req.method==='GET')return send(res,200,await distributionSummary(pool,url.searchParams)),true;
+ if(path===distributionBase+'/records'&&req.method==='GET')return send(res,200,await listDistributions(pool,url.searchParams)),true;
+ if(path===distributionBase+'/records'&&req.method==='POST'){const input=await body(req),saved=await transaction(c=>saveDistribution(c,input,actor,portal),actor);return send(res,saved.already_saved?200:201,saved),true;}
+ const record=path.match(new RegExp('^'+distributionBase+'/records/([a-f0-9-]+)$','i'));
+ if(record&&req.method==='GET')return send(res,200,await distributionDetail(pool,record[1])),true;
+ if(record&&req.method==='PATCH'){const input=await body(req);return send(res,200,await transaction(c=>updateDistribution(c,record[1],input,actor,portal),actor)),true;}
+ const history=path.match(new RegExp('^'+prefix+'/customers/([a-f0-9-]+)/milk-distributions$','i'));
+ if(history&&req.method==='GET')return send(res,200,await customerDistributionHistory(pool,history[1])),true;
+ const audit=path.match(new RegExp('^'+prefix+'/milk-operation-audit/(quality|distribution)/([a-f0-9-]+)$','i'));
+ if(audit&&req.method==='GET')return send(res,200,await operationAudit(pool,audit[1],audit[2])),true;
+ return false;
+}
 function sendPdf(res,pdf,download=false){
  const filename=encodeURIComponent(pdf.filename);
  res.setHeader('Content-Security-Policy',"default-src 'none'; frame-ancestors 'self'");
@@ -83,7 +116,8 @@ const server=http.createServer(async(req,res)=>{
  if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
- const asset=files[path]||(directoryPages.has(path)?files['/']:null)||(operationsPages.has(path)?['operations.html','text/html']:null);
+ const operationalDetail=/^\/(?:operations\/)?(?:milk-processing\/(?:batch|collection)|milk-distribution\/record)\/[a-f0-9-]{36}$/i.test(path);
+ const asset=files[path]||((directoryPages.has(path)||operationalDetail&&!path.startsWith('/operations/'))?files['/']:null)||((operationsPages.has(path)||operationalDetail&&path.startsWith('/operations/'))?['operations.html','text/html']:null);
  if(asset&&req.method==='GET'){const [f,mime]=asset;res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/operations/login'&&req.method==='POST'){
   if(!viewerEnabled&&!registrationViewerEnabled)throw new Problem(503,'Operations access is not configured.');
@@ -121,6 +155,7 @@ const server=http.createServer(async(req,res)=>{
    viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
   }
   if(await milkRoutes(req,res,path,url,'/api/operations/milk-collections',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
+  if(await operationalRoutes(req,res,path,url,'/api/operations/milk-processing',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
   if(path==='/api/operations/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
   const viewerCustomer=path.match(/^\/api\/operations\/customers\/([^/]+)$/);
@@ -149,6 +184,7 @@ const server=http.createServer(async(req,res)=>{
  if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Operations team'});
  if(path==='/api/logout'&&req.method==='POST'){sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
  if(await milkRoutes(req,res,path,url,'/api/milk-collections','admin','Admin'))return;
+ if(await operationalRoutes(req,res,path,url,'/api/milk-processing','admin','Admin'))return;
  if(path==='/api/archives'){
   if(req.method==='GET')return send(res,200,await listArchiveBatches());
   if(req.method==='POST')return send(res,201,await createArchiveBatch(batchMetadata(req.headers),await readPdfBody(req)));
@@ -204,7 +240,7 @@ const server=http.createServer(async(req,res)=>{
  throw new Problem(404,'Not found.');
  }catch(e){
  let status=e.status||500,message=e.status?e.message:'The request could not be completed. Try again.';
- if(e.code==='23505'){status=409;message=e.constraint?.startsWith('registration_archive_')?'This archive or page range is already stored.':'That National ID or KRA PIN is already registered. Check for a duplicate farmer.';}
+ if(e.code==='23505'){status=409;message=e.constraint?.startsWith('registration_archive_')?'This archive or page range is already stored.':e.constraint?.startsWith('milk_')?'This milk operation has already been saved. Refresh the page before retrying.':'That National ID or KRA PIN is already registered. Check for a duplicate farmer.';}
  if(e.constraint==='active_farmer_evidence'){status=400;message='Active status requires complete, current identity checks, consent and verified payment details, with no high-priority open notes.';}
  if(e.constraint!=='active_farmer_evidence'&&['23514','23502','22007','22008','22P02'].includes(e.code)){status=400;message='One or more fields are invalid. Check your entries.';}
  if(e.code==='23503'){status=400;message='Related farmer record not found.';}

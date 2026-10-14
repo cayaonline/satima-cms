@@ -9,10 +9,11 @@ const stakeholderPages={
 };
 const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:null);
 const milkRoute=window.milkUI.route(location.pathname,'/operations/milk-collection');
+const milkOperationRoute=window.milkOperations.route(location.pathname,'/operations');
 const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
-if(!stakeholderRoute&&!milkRoute)$('#operations-sidebar-label').textContent='Operations Portal · KRA verification access';
+if(!stakeholderRoute&&!milkRoute&&!milkOperationRoute)$('#operations-sidebar-label').textContent='Operations Portal · KRA verification access';
 
 if(routeCategory){
  $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
@@ -33,6 +34,7 @@ if(stakeholderRoute){
  for(const [id,value] of [['stakeholder-label',stakeholderRoute.label],['stakeholder-title',stakeholderRoute.title],['stakeholder-description',stakeholderRoute.description],['stakeholder-empty-title',stakeholderRoute.empty],['stakeholder-empty-description',stakeholderRoute.emptyDescription]])$('#'+id).textContent=value;
  document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===stakeholderRoute.name.toLowerCase();link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
 }
+if(milkOperationRoute){$('#farmer-content').hidden=true;$('#milk-operations-content').hidden=false;$('#breadcrumb').textContent=milkOperationRoute.title;document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===milkOperationRoute.module;link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
 if(milkRoute){$('#farmer-content').hidden=true;$('#milk-content').hidden=false;$('#breadcrumb').textContent=milkRoute.name;document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav==='milk';link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
 
 async function api(path,options={}){
@@ -42,7 +44,7 @@ async function api(path,options={}){
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
+async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkOperationRoute)window.milkOperations.mount(api,true,milkOperationRoute);else if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
 setupLogin(async credentials=>{await api('/login',{method:'POST',body:JSON.stringify(credentials)});location.assign('/operations');});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});location.replace('/operations/login');}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}});
 
@@ -95,7 +97,7 @@ function renderDetail(farmer,registration){
  $('#detail').innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(farmer.customer_id||'Farmer record')}</span><h2>${esc(farmer.full_name)}</h2><small>${esc(farmer.category||'Not assigned')} · ${esc(registrationLabel(farmer.registration_status))}${farmer.registration_status==='registered'?` · Registered ${date(farmer.registration_date)}`:''} · Read-only</small></div><button class="icon-button" id="close-detail" aria-label="Close farmer">×</button></div><div class="dialog-body">${photoCard(farmer)}<section class="card archive-profile"><h3>Original Registration Documents</h3><div id="farmer-archive-documents" aria-live="polite"><p class="muted">${sensitiveRegistration?'Loading documents…':'An elevated registration viewer account is required to view original forms.'}</p></div></section>${profileSummary(farmer,registration)}<div class="card"><h3>Paper-form evidence</h3>${references.length?`<ul class="source-list">${references.map(reference=>`<li>${esc(reference)}</li>`).join('')}</ul>`:'<p class="muted">No source reference recorded.</p>'}</div>${registration?registrationDetails(registration):''}</div>`;
  $('#close-detail').addEventListener('click',()=>$('#detail-dialog').close());
  if(sensitiveRegistration)loadFarmerArchive(farmer.id);
- window.mountMilkHistory(farmer.id,api,$('#detail .dialog-body'),true);
+ window.mountMilkHistory(farmer.id,api,$('#detail .dialog-body'),true);window.mountProcessingHistory(farmer.id,api,$('#detail .dialog-body'));
 }
 window.openFarmerProfile=async id=>{const farmer=await api('/farmers/'+id);const registration=sensitiveRegistration?await api('/farmers/'+id+'/registration'):null;renderDetail(farmer,registration);if(!$('#detail-dialog').open)$('#detail-dialog').showModal();};
 const pdfDialog=document.createElement('dialog');pdfDialog.id='archive-pdf-dialog';pdfDialog.className='archive-pdf-dialog';pdfDialog.innerHTML='<div class="dialog-head"><h2>Original Registration PDF</h2><div class="detail-actions"><button type="button" class="secondary" id="archive-fullscreen">Full screen</button><button type="button" class="icon-button" id="archive-close" aria-label="Return to farmer profile">×</button></div></div><iframe title="Protected farmer registration PDF"></iframe>';document.body.append(pdfDialog);
