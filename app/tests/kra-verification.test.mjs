@@ -1,8 +1,25 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {normalizedPin,pinFormat,compareNames,officialCheck,recordKraCheck,listKra} from '../kra-verification.mjs';
 import {pool,createFarmer,updateFarmer} from '../store.mjs';
 after(()=>pool.end());
+
+test('shared KRA UI renders interactive filters, first-column actions, and restores saved PIN status',()=>{
+ const browser={};runInNewContext(readFileSync(new URL('../public/kra-ui.js',import.meta.url),'utf8'),{window:browser});
+ const cards=browser.kraUI.cards({total:23,verified:2,pending:21,invalid:2,missing:6,review:8},'missing');
+ assert.equal((cards.match(/data-kra-bucket=/g)||[]).length,6);
+ assert.match(cards,/data-kra-bucket="missing" aria-pressed="true"/);
+ const table=browser.kraUI.table({records:[{id:'one',customer_id:'SF-F-0001',full_name:'Farmer',kra_pin:'P123456789A',format:'valid',kra_status:'verified',name_match:'exact'}],pagination:{total:1,total_pages:1}},1);
+ assert.match(table,/<th>Action<\/th><th>Farmer ID<\/th>/);
+ assert.match(table,/<td><button class="link-button" data-kra-review="one">Review \/ Verify<\/button><\/td>/);
+ const select={value:''},previous={textContent:''},form={elements:{pin_status:select},querySelector:()=>previous};
+ browser.kraUI.restorePinStatus(form,{farmer:{kra_pin:'P123456789A'},history:[{pin_snapshot:'P123456789A',pin_status:'Inactive'}]});
+ assert.equal(select.value,'Inactive');
+ browser.kraUI.restorePinStatus(form,{farmer:{kra_pin:'P123456789A'},history:[{pin_snapshot:'P123456789A',pin_status:'Not Available'}]});
+ assert.equal(select.value,'Unable to Confirm');
+});
 
 test('PIN format is distinct from official verification',()=>{
  assert.equal(normalizedPin(' p123456789a '),'P123456789A');
@@ -25,6 +42,8 @@ test('manual check records an append-only audit row and rejects invalid PINs',as
  assert.equal(result.outcome,'verified');assert.equal(calls.length,3);assert(calls[2].sql.includes('INSERT INTO farmer_kra_verifications'));
  assert.equal(calls[2].values[2],'pending');assert.equal(calls[2].values[6],'possible');
  await assert.rejects(recordKraCheck(c,'id',{...input,checked_at:'2026-02-31'},'Administrator'),error=>error.status===400);
+ await assert.rejects(recordKraCheck(c,'id',{...input,pin_status:'Unable to Confirm'},'Administrator'),error=>error.status===400);
+ await assert.rejects(recordKraCheck(c,'id',{...input,pin_status:'Unstructured status'},'Administrator'),error=>error.status===400);
  farmer.kra_pin='BAD';await assert.rejects(recordKraCheck(c,'id',{...input,expected_pin:'BAD'},'Administrator'),error=>error.status===400);
 });
 test('verification search is parameterized and returns formats without changing PINs',async()=>{
@@ -33,6 +52,7 @@ test('verification search is parameterized and returns formats without changing 
  assert.equal(result.records[0].format,'valid');assert.equal(result.stats.pending,2);
  assert(queries[1].values[0].includes('\\%\\_'));assert(!queries[1].sql.includes("P%_'"));
  await assert.rejects(listKra(db,new URLSearchParams({page:'0'})),error=>error.status===400);
+ await assert.rejects(listKra(db,new URLSearchParams({bucket:'unknown'})),error=>error.status===400);
 });
 test('isolated database stores format, detects duplicates, preserves manual audit, and invalidates a check after PIN correction',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
@@ -50,8 +70,15 @@ test('isolated database stores format, detects duplicates, preserves manual audi
   const missingFlag=await recordKraCheck(c,missing.id,{outcome:'needs_review',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',expected_pin:'',expected_revision:null},'operations','Operations');
   assert.equal(missingFlag.outcome,'needs_review');
   assert.equal((await listKra(c,new URLSearchParams({q:'TEST KRA MISSING'}))).records[0].kra_status,'needs_review');
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'invalid',q:'TEST KRA'}))).pagination.total,1);
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'missing',q:'TEST KRA'}))).pagination.total,1);
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'review',q:'TEST KRA'}))).pagination.total,2);
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'pending',q:'TEST KRA'}))).pagination.total,3);
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'invalid',q:'TEST KRA MISSING'}))).pagination.total,0);
   const result=await recordKraCheck(c,first.id,{outcome:'verified',taxpayer_name:'TEST KRA FARMER',pin_status:'Active',checked_at:'2026-10-12',checked_by:'TEST ACCOUNTANT',expected_pin:'A987654321Z',expected_revision:null},'Administrator');
   assert.equal(result.name_match,'exact');
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'verified',q:'TEST KRA'}))).pagination.total,1);
+  assert.equal((await listKra(c,new URLSearchParams({bucket:'pending',q:'TEST KRA'}))).pagination.total,2);
   const listed=await listKra(c,new URLSearchParams({q:'TEST KRA FARMER'}));assert.equal(listed.records.find(r=>r.id===first.id)?.kra_status,'verified');
   const revision=(await c.query('SELECT updated_at::text revision FROM farmers WHERE id=$1',[first.id])).rows[0].revision;
   await updateFarmer(c,first.id,{full_name:'TEST KRA FARMER',primary_phone:'TEST-KRA-1',registered_by:'TEST',kra_pin:'P987654321B',revision});
