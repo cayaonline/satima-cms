@@ -12,6 +12,7 @@ const milkRoute=window.milkUI.route(location.pathname,'/operations/milk-collecti
 const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
+if(!stakeholderRoute&&!milkRoute)$('#operations-sidebar-label').textContent='Operations Portal · KRA verification access';
 
 if(routeCategory){
  $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
