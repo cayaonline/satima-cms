@@ -4,7 +4,9 @@
 import pg from 'pg';
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {planSync,schema} from './master-sync-core.mjs';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {canonicalRows,planSync,schema} from './master-sync-core.mjs';
 
 const [mode,entity,sourcePath,planPath]=process.argv.slice(2);
 if(!['preview','apply'].includes(mode)||!schema[entity]||!sourcePath||!planPath)throw new Error('Usage: sync-master.mjs preview|apply farmers|customers|distributors source.csv private-plan.json');
@@ -28,7 +30,15 @@ function csv(text){
   return Object.fromEntries(headers.map((key,col)=>[key,cells[col].trim()]).concat([['source_row',index+2]]));
  });
 }
-const raw=await readFile(sourcePath),sourceHash=createHash('sha256').update(raw).digest('hex'),rows=csv(raw.toString('utf8'));
+const raw=await readFile(sourcePath),sourceHash=createHash('sha256').update(raw).digest('hex');
+let rows;
+if(/\.xlsx$/i.test(sourcePath)){
+ const parsed=spawnSync('python3',[fileURLToPath(new URL('./xlsx-rows.py',import.meta.url)),sourcePath],{encoding:'utf8',maxBuffer:50*1024*1024});
+ if(parsed.status!==0)throw new Error(parsed.stderr.trim()||'Workbook could not be read.');
+ rows=JSON.parse(parsed.stdout);
+}else if(/\.csv$/i.test(sourcePath))rows=csv(raw.toString('utf8'));
+else throw new Error('Use an .xlsx workbook or UTF-8 .csv file.');
+rows=canonicalRows(entity,rows);
 const spec=schema[entity];if(!rows.length)throw new Error('Source has no records.');
 for(const key of [spec.name,spec.phone])if(!Object.hasOwn(rows[0],key))throw new Error(`Required CSV column: ${key}`);
 const db=new pg.Client({connectionString:process.env.ADMIN_DATABASE_URL,connectionTimeoutMillis:15000,options:'-c lock_timeout=5000 -c statement_timeout=120000'});

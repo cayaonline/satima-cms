@@ -5,6 +5,29 @@ export const schema={
  distributors:{table:'distributors',code:'distributor_code',name:'name',phone:'phone_number',fields:['name','phone_number','location','route_name','manager_name'],columns:['id','distributor_code','name','phone_number','location','route_name','manager_name','record_type','parent_id']}
 };
 export const normalizedName=value=>String(value||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('en');
+export function canonicalRows(entity,rows){
+ const spec=schema[entity];if(!spec)throw new Error('Unknown directory.');
+ const aliases={
+  [spec.name]:['name','farmername','customername','distributorname','storename'],
+  [spec.phone]:['phone','phoneno','phonenumber','mobilenumber','mobile','contactnumber','telephone'],
+  [spec.code]:['customerid','farmerid','distributorid','storeid'],
+  category:['category','suppliercategory','customercategory'],
+  physical_address:['address','physicaladdress','addresslocation',...(entity==='customers'?['location','town']:[])],
+  location:entity==='customers'?[]:['location','town'],route_name:['route','routename'],manager_name:['manager','managername'],
+  record_type:['type','recordtype'],parent_code:['parent','parentcode','parentdistributor']
+ };
+ const lookup=new Map();for(const [field,names] of Object.entries(aliases))for(const name of names)lookup.set(name,field);
+ return rows.map(row=>{
+  const result={...row};
+  for(const [key,value] of Object.entries(row)){
+   const field=lookup.get(key.toLowerCase().replace(/[^a-z0-9]/g,''));
+   if(!field||field===key)continue;
+   if(result[field]&&value&&result[field]!==value)throw new Error('Conflicting source columns for '+field+'.');
+   if(!result[field])result[field]=value;
+  }
+  return result;
+ });
+}
 export function normalizedPhone(value){
  const digits=String(value||'').replace(/\D/g,'');
  if(/^0[17]\d{8}$/.test(digits))return '+254'+digits.slice(1);
