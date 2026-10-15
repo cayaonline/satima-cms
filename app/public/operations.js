@@ -1,4 +1,5 @@
 const $=selector=>document.querySelector(selector);
+const overviewRoute=location.pathname==='/operations',supportRoute=location.pathname==='/operations/contact-support';
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const categoryRoutes={'Satima Farmers':'/operations/category/satima','Larger Sagana Farmers':'/operations/category/larger-sagana','Kangema Farmers':'/operations/category/kangema','Others':'/operations/category/others'};
 const routeCategory=Object.entries(categoryRoutes).find(([,path])=>path===location.pathname)?.[0]||null;
@@ -17,6 +18,8 @@ let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
 if(!stakeholderRoute&&!milkRoute&&!milkOperationRoute)$('#operations-sidebar-label').textContent='Operations Portal · KRA verification access';
 
+if(overviewRoute||supportRoute){$('#farmer-content').hidden=true;$('#home-support-content').hidden=false;$('#breadcrumb').textContent=overviewRoute?'Home':'Contact Support';document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===(overviewRoute?'home':'support');link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
+if(!overviewRoute&&!supportRoute&&!stakeholderRoute&&!milkRoute&&!milkOperationRoute){const link=document.querySelector('[data-nav="farmers"]');link.classList.add('active');link.setAttribute('aria-current','page');}
 if(routeCategory){
  $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
  $('#page-title').textContent=routeCategory;$('#breadcrumb').textContent=routeCategory;
@@ -52,7 +55,7 @@ async function api(path,options={}){
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkOperationRoute)window.milkOperations.mount(api,true,milkOperationRoute);else if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(stakeholderRoute?.name==='Distributors')window.initDistributorDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
+async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(overviewRoute||supportRoute)window.homeSupport.mount(api,true,overviewRoute?'home':'support');else if(milkOperationRoute)window.milkOperations.mount(api,true,milkOperationRoute);else if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(stakeholderRoute?.name==='Distributors')window.initDistributorDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
 setupLogin(async credentials=>{await api('/login',{method:'POST',body:JSON.stringify(credentials)});location.assign('/operations');});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});location.replace('/operations/login');}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}});
 
@@ -119,7 +122,7 @@ $('#detail-dialog').addEventListener('click',event=>{if(event.target===$('#detai
 $('#search').addEventListener('input',()=>{clearTimeout(debounce);page=1;debounce=setTimeout(load,200);});
 for(const id of ['category','registration','gender','sort'])$('#'+id).addEventListener('change',()=>{page=1;load();});
 $('#clear-filters').addEventListener('click',()=>{for(const [id,value] of [['category',routeCategory||''],['registration',statusRoute?.registration||''],['gender',''],['sort','customer_id:asc'],['search','']])$('#'+id).value=value;page=1;load();});
-document.addEventListener('visibilitychange',()=>{if(!stakeholderRoute&&!milkRoute&&!kraRoute&&!document.hidden&&!$('#workspace').hidden)load();});
+document.addEventListener('visibilitychange',()=>{if(!overviewRoute&&!supportRoute&&!stakeholderRoute&&!milkRoute&&!kraRoute&&!document.hidden&&!$('#workspace').hidden)load();});
 document.addEventListener('pointerdown',event=>{const filters=$('#directory-filters');if(filters.open&&!filters.contains(event.target))filters.open=false;});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#directory-filters').open){$('#directory-filters').open=false;$('#directory-filters summary').focus();}});
 function showToast(message){$('#toast').textContent=message;$('#toast').hidden=false;}

@@ -7,6 +7,8 @@ import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.m
 import {listDistributors,distributorDetail,updateDistributor,distributorAudit} from './distributors.mjs';
 import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
+import {homeSummary} from './home.mjs';
+import {createTicket,listTickets,ticketDetail,updateTicket,deliverTicket,retryPending} from './support.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
@@ -29,8 +31,11 @@ const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewe
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+files['/home-support.js']=['home-support.js','text/javascript'];
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
+directoryPages.add('/farmers');directoryPages.add('/contact-support');
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
+operationsPages.add('/operations/farmers');operationsPages.add('/operations/contact-support');
 for(const status of ['all','registered','not-registered']){directoryPages.add('/farmers/'+status);operationsPages.add('/operations/farmers/'+status);}
 for(const page of ['/milk-processing','/milk-distribution']){directoryPages.add(page);operationsPages.add('/operations'+page);}
 for(const page of ['/milk-processing/new','/milk-distribution/new']){directoryPages.add(page);operationsPages.add('/operations'+page);}
@@ -130,6 +135,7 @@ async function clearDevice(req,res){const token=cookieToken(req,'satima_draft_de
 async function session(req){const token=cookieToken(req);return await sessions.role(token)==='administrator'?token:null;}
 async function viewerSession(req){const token=cookieToken(req,'satima_viewer_session'),role=await viewerSessions.role(token);return (role==='viewer'&&viewerEnabled)||(role==='registration_viewer'&&registrationViewerEnabled)?{token,role}:null;}
 setInterval(()=>{sessions.prune().catch(()=>{});attempts.prune();viewerAttempts.prune();},3600000).unref();
+setInterval(()=>{retryPending(pool).catch(()=>{});},60000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -179,6 +185,12 @@ const server=http.createServer(async(req,res)=>{
    await viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});
   }
   if(await drafts(req,res,path,viewer.role))return;
+  if(path==='/api/operations/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
+  if(path==='/api/operations/support'&&req.method==='POST'){
+   const input=await body(req),result=await transaction(c=>createTicket(c,input,'Operations'));
+   const delivery=await deliverTicket(pool,result.id);
+   return send(res,result.already_saved?200:201,{ticket_reference:result.ticket_reference,notification_status:delivery.notification_status,already_saved:result.already_saved});
+  }
   if(await milkRoutes(req,res,path,url,'/api/operations/milk-collections',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(await operationalRoutes(req,res,path,url,'/api/operations/milk-processing',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
@@ -212,6 +224,19 @@ const server=http.createServer(async(req,res)=>{
  if(path==='/api/session'&&req.method==='GET'){draftDevice(req,res);return send(res,200,{operator:'Operations team'});}
  if(path==='/api/logout'&&req.method==='POST'){await sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});}
  if(await drafts(req,res,path,'administrator'))return;
+ if(path==='/api/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
+ if(path==='/api/support'&&req.method==='POST'){
+  const input=await body(req),result=await transaction(c=>createTicket(c,input,'Admin'));
+  const delivery=await deliverTicket(pool,result.id);
+  return send(res,result.already_saved?200:201,{ticket_reference:result.ticket_reference,notification_status:delivery.notification_status,already_saved:result.already_saved});
+ }
+ if(path==='/api/support/tickets'&&req.method==='GET')return send(res,200,await listTickets(pool,url.searchParams));
+ const supportTicket=path.match(/^\/api\/support\/tickets\/([a-f0-9-]{36})(?:\/(retry))?$/i);
+ if(supportTicket){
+  if(req.method==='GET'&&!supportTicket[2])return send(res,200,await ticketDetail(pool,supportTicket[1]));
+  if(req.method==='PATCH'&&!supportTicket[2]){const input=await body(req);return send(res,200,await transaction(c=>updateTicket(c,supportTicket[1],input)));}
+  if(req.method==='POST'&&supportTicket[2])return send(res,200,await deliverTicket(pool,supportTicket[1],process.env,undefined,true));
+ }
  if(await milkRoutes(req,res,path,url,'/api/milk-collections','admin','Admin'))return;
  if(await operationalRoutes(req,res,path,url,'/api/milk-processing','admin','Admin'))return;
  if(path==='/api/archives'){

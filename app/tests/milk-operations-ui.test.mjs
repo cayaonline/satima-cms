@@ -20,7 +20,7 @@ test('processing and distribution have dedicated same-tab pages in both portals'
  for(const file of ['index.html','operations.html']){
   const html=readFileSync(new URL('../public/'+file,import.meta.url),'utf8');
   const names=[...html.matchAll(/data-nav="([^"]+)"/g)].map(item=>item[1]);
-  assert.deepEqual(names,['farmers','customers','distributors','milk','processing','distribution']);
+  assert.deepEqual(names,['home','farmers','customers','distributors','milk','processing','distribution','support']);
   assert.match(html,/id="milk-operations-content"/);
  }
 });

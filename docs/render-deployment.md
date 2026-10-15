@@ -40,3 +40,8 @@ node app/scripts/test-hosted.mjs
 The hosted test creates and removes a disposable Docker PostgreSQL instance. It tests migrations as a non-superuser owner, repeat migration safety, restricted-only startup, HTTPS origin checks, Secure cookies, login, registration, editing, search, persistence and denied destructive operations. It never connects to the existing CMS database. Actual TLS and the deployed URL are checked after provisioning.
 
 References: [Render Free](https://render.com/docs/free), [Render web services](https://render.com/docs/web-services), [Neon](https://neon.com/faster).
+### Home dashboard and support notifications
+
+Apply migration `030_support_tickets.sql` through the normal hosted migration command before deploying the Home and Contact Support pages. The dashboard reads the existing operational tables and does not need new credentials. Ticket submission persists to PostgreSQL even without email configuration.
+
+To send support notifications, set these private Render environment variables: `CONTACT_SUPPORT_EMAIL` (destination inbox), `SUPPORT_EMAIL_FROM` (verified sender), `SUPPORT_SMTP_HOST`, `SUPPORT_SMTP_PORT` (465 or 587), `SUPPORT_SMTP_USER`, and `SUPPORT_SMTP_PASSWORD`. Do not place values in Git. Until all are set, tickets remain `pending`; the Admin Contact Support page shows that state. Failed deliveries remain in the database, are retried in the background after 15 minutes, and can be retried from the Admin ticket detail. Test actual inbox delivery after configuring the transport. Operations users can submit tickets but cannot list, read, or manage the ticket queue.
