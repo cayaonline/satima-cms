@@ -10,8 +10,10 @@ test('processing and distribution have dedicated same-tab pages in both portals'
   assert.equal(route(base+'/milk-processing/category/satima',base).category,'Satima Farmers');
   assert.equal(route(base+'/milk-processing/awaiting-categorisation',base).category,'unassigned');
   assert.equal(route(base+'/milk-processing/new',base).type,'new-batch');
+  for(const metric of ['received','accepted','rejected','processed','pending'])assert.equal(route(base+'/milk-processing/kpi/'+metric,base).metric,metric);
   assert.equal(route(base+'/milk-distribution',base).module,'distribution');
   assert.equal(route(base+'/milk-distribution/new',base).type,'new-distribution');
+  for(const metric of ['finished','distributed','bottles','records','remaining'])assert.equal(route(base+'/milk-distribution/kpi/'+metric,base).metric,metric);
   assert.equal(route(base+'/milk-distribution/record/12345678-1234-1234-1234-123456789abc',base).type,'record');
   assert.equal(route(base+'/milk-processing/category/unknown',base),null);
  }

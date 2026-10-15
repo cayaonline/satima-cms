@@ -10,6 +10,24 @@ export class SessionStore{
  revoke(token){if(typeof token==='string'&&/^[a-f0-9]{64}$/.test(token))this.entries.delete(tokenHash(token));}
  issue(previous,role='administrator'){this.prune();this.revoke(previous);if(this.entries.size>=this.limit)return null;const token=randomBytes(32).toString('hex');this.entries.set(tokenHash(token),{expires:this.now()+this.ttl,role});return token;}
 }
+export class PersistentSessionStore{
+ constructor(pool,{ttl=30*86400000}={}){this.pool=pool;this.ttl=ttl;}
+ async role(token){
+  if(typeof token!=='string'||!unsignedToken.test(token))return null;
+  const {rows:[entry]}=await this.pool.query('SELECT role FROM auth_sessions WHERE token_hash=$1 AND expires_at>now()',[tokenHash(token)]);
+  return entry?.role||null;
+ }
+ async revoke(token){if(typeof token==='string'&&unsignedToken.test(token))await this.pool.query('DELETE FROM auth_sessions WHERE token_hash=$1',[tokenHash(token)]);}
+ async issue(previous,role='administrator'){
+  const token=randomBytes(32).toString('hex');
+  const client=await this.pool.connect();
+  try{await client.query('BEGIN');if(typeof previous==='string'&&unsignedToken.test(previous))await client.query('DELETE FROM auth_sessions WHERE token_hash=$1',[tokenHash(previous)]);
+   await client.query('INSERT INTO auth_sessions(token_hash,role,expires_at) VALUES($1,$2,now()+$3::interval)',[tokenHash(token),role,`${this.ttl} milliseconds`]);await client.query('COMMIT');return token;
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+ }
+ async prune(){await this.pool.query('DELETE FROM auth_sessions WHERE expires_at<=now()');}
+}
+const unsignedToken=/^[a-f0-9]{64}$/;
 export async function hashViewerPassword(password,salt=randomBytes(16)){
  if(typeof password!=='string'||password.length<9)throw new Error('Viewer password must be at least 9 characters.');
  const derived=await scrypt(password,salt,64,{N:16384,r:8,p:1,maxmem:32*1024*1024});

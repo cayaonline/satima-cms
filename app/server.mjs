@@ -1,4 +1,4 @@
-import {SessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
+import {PersistentSessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
@@ -9,14 +9,16 @@ import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
-import {createHash,timingSafeEqual} from 'node:crypto';
+import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {pool,Problem,text,transaction,createFarmer,updateFarmer,detail} from './store.mjs';
 import {photographBody,readPhotograph,savePhotograph,removePhotograph} from './photographs.mjs';
 import {readPdfBody,batchMetadata,createArchiveBatch,listArchiveBatches,listArchiveEntries,saveArchiveEntry,farmerArchiveDocuments,protectedPdf} from './registration-archive.mjs';
 if(!process.env.CMS_PASSWORD||process.env.CMS_PASSWORD.length<9)throw new Error('CMS_PASSWORD must be at least 9 characters.');
-const ttl=8*3600*1000,sessions=new SessionStore({ttl}),attempts=new LoginLimiter();
-const viewerSessions=new SessionStore({ttl}),viewerAttempts=new LoginLimiter();
+const sessionDays=Number(process.env.AUTH_SESSION_DAYS||30);
+if(!Number.isInteger(sessionDays)||sessionDays<1||sessionDays>30)throw new Error('AUTH_SESSION_DAYS must be between 1 and 30.');
+const ttl=sessionDays*86400000,sessions=new PersistentSessionStore(pool,{ttl}),attempts=new LoginLimiter();
+const viewerSessions=sessions,viewerAttempts=new LoginLimiter();
 const viewerUsername=process.env.VIEWER_USERNAME,viewerPasswordHash=process.env.VIEWER_PASSWORD_HASH;
 if((viewerUsername||viewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(viewerUsername||'')||!validViewerHash(viewerPasswordHash)))throw new Error('Viewer credentials must be configured together with a valid scrypt hash.');
 const viewerEnabled=!!(viewerUsername&&viewerPasswordHash);
@@ -26,13 +28,15 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 for(const status of ['all','registered','not-registered']){directoryPages.add('/farmers/'+status);operationsPages.add('/operations/farmers/'+status);}
 for(const page of ['/milk-processing','/milk-distribution']){directoryPages.add(page);operationsPages.add('/operations'+page);}
 for(const page of ['/milk-processing/new','/milk-distribution/new']){directoryPages.add(page);operationsPages.add('/operations'+page);}
 for(const slug of ['satima','larger-sagana','kangema','others']){directoryPages.add('/milk-processing/category/'+slug);operationsPages.add('/operations/milk-processing/category/'+slug);}
+for(const metric of ['received','accepted','rejected','processed','pending']){directoryPages.add('/milk-processing/kpi/'+metric);operationsPages.add('/operations/milk-processing/kpi/'+metric);}
+for(const metric of ['finished','distributed','bottles','records','remaining']){directoryPages.add('/milk-distribution/kpi/'+metric);operationsPages.add('/operations/milk-distribution/kpi/'+metric);}
 directoryPages.add('/milk-processing/awaiting-categorisation');operationsPages.add('/operations/milk-processing/awaiting-categorisation');
 for(const bucket of ['all','verified','pending','invalid','missing','review']){
  directoryPages.add('/farmers/kra-verification/'+bucket);
@@ -44,6 +48,7 @@ for(const slug of ['satima','larger-sagana','kangema','others']){
 }
 directoryPages.add('/milk-collection/awaiting-categorisation');
 operationsPages.add('/operations/milk-collection/awaiting-categorisation');
+for(const metric of ['today','week','month','farmers-today']){directoryPages.add('/milk-collection/kpi/'+metric);operationsPages.add('/operations/milk-collection/kpi/'+metric);}
 for(const slug of Object.keys(customerCategoryRoutes)){
  directoryPages.add('/customers/category/'+slug);
  operationsPages.add('/operations/customers/category/'+slug);
@@ -109,9 +114,22 @@ function sendPdf(res,pdf,download=false){
 }
 async function body(req){let data='';for await(const b of req){data+=b;if(data.length>40000)throw new Problem(413,'Request too large.');}try{const value=JSON.parse(data);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();return value;}catch{throw new Problem(400,'Invalid JSON.');}}
 function cookieToken(req,name='satima_session'){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1);}
-function session(req){const token=cookieToken(req);return sessions.role(token)==='administrator'?token:null;}
-function viewerSession(req){const token=cookieToken(req,'satima_viewer_session'),role=viewerSessions.role(token);return role==='viewer'||role==='registration_viewer'?{token,role}:null;}
-setInterval(()=>{sessions.prune();viewerSessions.prune();attempts.prune();viewerAttempts.prune();},60000).unref();
+const draftKinds=new Set(['farmer-registration','milk-collection','quality-control','processing-batch','milk-distribution']);
+function draftDevice(req,res){let token=cookieToken(req,'satima_draft_device');if(!/^[a-f0-9]{64}$/.test(token||'')){token=randomBytes(32).toString('hex');const existing=res.getHeader('Set-Cookie');res.setHeader('Set-Cookie',[...(Array.isArray(existing)?existing:existing?[existing]:[]),`satima_draft_device=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`]);}return createHash('sha256').update(token).digest('hex');}
+async function drafts(req,res,path,role){
+ const match=path.match(/^\/api\/(?:operations\/)?drafts\/([a-z-]+)$/);if(!match)return false;
+ const kind=match[1];if(!draftKinds.has(kind)||role!=='administrator'&&kind==='farmer-registration')throw new Problem(403,'Draft access is not available.');
+ res.setHeader('Cache-Control','private, no-store');
+ const device=draftDevice(req,res);
+ if(req.method==='GET'){const {rows:[row]}=await pool.query('SELECT content,updated_at FROM form_drafts WHERE device_hash=$1 AND role=$2 AND kind=$3 AND expires_at>now()',[device,role,kind]);send(res,200,row||{content:null});return true;}
+ if(req.method==='PUT'){const input=await body(req);if(!input.content||typeof input.content!=='object'||Array.isArray(input.content))throw new Problem(400,'Invalid draft.');await pool.query('INSERT INTO form_drafts(device_hash,role,kind,content,expires_at) VALUES($1,$2,$3,$4,now()+interval \'7 days\') ON CONFLICT(device_hash,role,kind) DO UPDATE SET content=EXCLUDED.content,updated_at=now(),expires_at=EXCLUDED.expires_at',[device,role,kind,input.content]);send(res,200,{ok:true});return true;}
+ if(req.method==='DELETE'){await pool.query('DELETE FROM form_drafts WHERE device_hash=$1 AND role=$2 AND kind=$3',[device,role,kind]);send(res,200,{ok:true});return true;}
+ throw new Problem(405,'Unsupported draft request.');
+}
+async function clearDevice(req,res){const token=cookieToken(req,'satima_draft_device');if(/^[a-f0-9]{64}$/.test(token||''))await pool.query('DELETE FROM form_drafts WHERE device_hash=$1',[createHash('sha256').update(token).digest('hex')]);const existing=res.getHeader('Set-Cookie');res.setHeader('Set-Cookie',[...(Array.isArray(existing)?existing:existing?[existing]:[]),`satima_draft_device=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`]);}
+async function session(req){const token=cookieToken(req);return await sessions.role(token)==='administrator'?token:null;}
+async function viewerSession(req){const token=cookieToken(req,'satima_viewer_session'),role=await viewerSessions.role(token);return (role==='viewer'&&viewerEnabled)||(role==='registration_viewer'&&registrationViewerEnabled)?{token,role}:null;}
+setInterval(()=>{sessions.prune().catch(()=>{});attempts.prune();viewerAttempts.prune();},3600000).unref();
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
@@ -137,9 +155,9 @@ const server=http.createServer(async(req,res)=>{
   const validPassword=await verifyViewerPassword(credentials.password,expectedHash);
   if(!validPassword||(!elevated&&credentials.username!==viewerUsername))throw new Problem(401,'Incorrect username or password.');
   viewerAttempts.clear(key);
-  const token=viewerSessions.issue(cookieToken(req,'satima_viewer_session'),elevated?'registration_viewer':'viewer');
+  const token=await viewerSessions.issue(cookieToken(req,'satima_viewer_session'),elevated?'registration_viewer':'viewer');
   if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
-  res.setHeader('Set-Cookie',`satima_viewer_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);
+  res.setHeader('Set-Cookie',`satima_viewer_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);draftDevice(req,res);
   return send(res,200,{ok:true});
  }
  if(path==='/api/login'&&req.method==='POST'){
@@ -150,16 +168,17 @@ const server=http.createServer(async(req,res)=>{
  if(typeof b.password!=='string'||!b.password)throw new Problem(400,'Please enter your password.');
  const validPassword=timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD));
  if(b.username!=='admin'||!validPassword)throw new Problem(401,'Incorrect username or password.');
- attempts.clear(key);const token=sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
- res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);return send(res,200,{ok:true});
+ attempts.clear(key);const token=await sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
+ res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);draftDevice(req,res);return send(res,200,{ok:true});
  }
  if(path.startsWith('/api/operations/')){
-  const viewer=viewerSession(req);
+  const viewer=await viewerSession(req);
   if(!viewer)throw new Problem(401,'Sign in to the Operations Portal.');
-  if(path==='/api/operations/session'&&req.method==='GET')return send(res,200,{role:'viewer',sensitive_registration:viewer.role==='registration_viewer'});
+  if(path==='/api/operations/session'&&req.method==='GET'){draftDevice(req,res);return send(res,200,{role:'viewer',sensitive_registration:viewer.role==='registration_viewer'});}
   if(path==='/api/operations/logout'&&req.method==='POST'){
-   viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});
+   await viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});
   }
+  if(await drafts(req,res,path,viewer.role))return;
   if(await milkRoutes(req,res,path,url,'/api/operations/milk-collections',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(await operationalRoutes(req,res,path,url,'/api/operations/milk-processing',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
@@ -189,9 +208,10 @@ const server=http.createServer(async(req,res)=>{
   if(viewerFarmer){if(!uuid.test(viewerFarmer[1]))throw new Problem(400,'Invalid farmer identifier.');return send(res,200,await operationsFarmerDetail(pool,viewerFarmer[1]));}
   throw new Problem(404,'Not found.');
  }
- const token=session(req);if(!token)throw new Problem(401,'Sign in to continue.');
- if(path==='/api/session'&&req.method==='GET')return send(res,200,{operator:'Operations team'});
- if(path==='/api/logout'&&req.method==='POST'){sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
+ const token=await session(req);if(!token)throw new Problem(401,'Sign in to continue.');
+ if(path==='/api/session'&&req.method==='GET'){draftDevice(req,res);return send(res,200,{operator:'Operations team'});}
+ if(path==='/api/logout'&&req.method==='POST'){await sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});}
+ if(await drafts(req,res,path,'administrator'))return;
  if(await milkRoutes(req,res,path,url,'/api/milk-collections','admin','Admin'))return;
  if(await operationalRoutes(req,res,path,url,'/api/milk-processing','admin','Admin'))return;
  if(path==='/api/archives'){

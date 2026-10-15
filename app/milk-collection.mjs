@@ -56,9 +56,9 @@ const sortSql={newest:'m.date_received DESC,m.created_at DESC,m.id DESC',oldest:
 
 export async function listMilkCollections(pool,params){
  const {where,values,sort}=filters(params),page=pageNumber(params.get('page')),size=30;
- const {rows:[totals]}=await pool.query(`SELECT count(*)::int AS total,coalesce(sum(m.quantity_liters),0)::text AS total_liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where}`,values);
+ const {rows:[totals]}=await pool.query(`SELECT count(*)::int AS total,count(DISTINCT m.farmer_id)::int AS unique_farmers,coalesce(sum(m.quantity_liters),0)::text AS total_liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where}`,values);
  const {rows}=await pool.query(`SELECT m.id,m.collection_id,m.farmer_id,f.customer_id AS farmer_code,f.full_name AS farmer_name,m.supplier_category_at_collection AS category,m.quantity_liters::text,m.date_received::text,m.recorded_by,m.source_portal,m.created_at FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} ORDER BY ${sortSql[sort]} LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,size,(page-1)*size]);
- return {records:rows,pagination:{page,page_size:size,total:totals.total,total_pages:Math.max(1,Math.ceil(totals.total/size))},total_liters:totals.total_liters};
+ return {records:rows,pagination:{page,page_size:size,total:totals.total,total_pages:Math.max(1,Math.ceil(totals.total/size))},total_liters:totals.total_liters,unique_farmers:totals.unique_farmers};
 }
 
 export async function milkSummary(pool){

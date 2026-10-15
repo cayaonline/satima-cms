@@ -6,6 +6,9 @@ import pg from 'pg';
 import http from 'node:http';
 import {deflateSync} from 'node:zlib';
 import {setTimeout as delay} from 'node:timers/promises';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {hashViewerPassword} from '../security.mjs';
 import {PDFDocument} from 'pdf-lib';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
@@ -14,7 +17,7 @@ const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString(
 function crc32(bytes){let value=0xffffffff;for(const byte of bytes){value^=byte;for(let i=0;i<8;i++)value=(value>>>1)^(-(value&1)&0xedb88320);}return (value^0xffffffff)>>>0;}
 function pngChunk(type,data){const tag=Buffer.from(type),result=Buffer.alloc(data.length+12);result.writeUInt32BE(data.length);tag.copy(result,4);data.copy(result,8);result.writeUInt32BE(crc32(Buffer.concat([tag,data])),data.length+8);return result;}
 function pngPixel(r,g,b){const header=Buffer.alloc(13);header.writeUInt32BE(1,0);header.writeUInt32BE(1,4);header[8]=8;header[9]=2;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',header),pngChunk('IDAT',deflateSync(Buffer.from([0,r,g,b]))),pngChunk('IEND',Buffer.alloc(0))]);}
-let server,localServer,db;
+let server,localServer,db,phase='startup',serverLog='';
 function run(args,options={}){const r=spawnSync(docker,args,{encoding:'utf8',...options});if(r.status!==0)throw new Error('Docker test command failed');return r.stdout.trim();}
 function migration(env){const r=spawnSync(process.execPath,['app/scripts/migrate-hosted.mjs'],{env,encoding:'utf8'});assert.equal(r.status,0,r.stdout+r.stderr);}
 try{
@@ -30,6 +33,7 @@ try{
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
  server=spawn(process.execPath,['app/scripts/start-hosted.mjs'],{env,stdio:['ignore','pipe','pipe']});
+ server.stderr.on('data',chunk=>{serverLog+=chunk.toString();});
  for(let n=0;n<80;n++){try{if((await fetch('http://127.0.0.1:31987/health')).status===200)break;}catch{}await delay(100);}
  const request=(path,options={})=>new Promise((resolve,reject)=>{
   const r=http.request('http://127.0.0.1:31987'+path,{method:options.method||'GET',headers:{Host:'satima.example',...options.headers}},res=>{const data=[];res.on('data',b=>data.push(b));res.on('end',()=>resolve(new Response(Buffer.concat(data),{status:res.statusCode,headers:res.headers})));});
@@ -94,9 +98,19 @@ const adminWrongUsername=await request('/api/login',{method:'POST',headers:{Orig
 const adminWrongPassword=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:'incorrect-password'})});
 assert.equal(adminWrongUsername.status,401);assert.equal(adminWrongPassword.status,401);
 assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.json()).error,'Login errors must not identify which credential was wrong');
-const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});
+ phase='administrator login';
+ const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});
 assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+ phase='administrator draft and farmer workflow';
+ const draftCookie=login.headers.get('set-cookie').match(/satima_draft_device=[a-f0-9]{64}/)?.[0];
+ assert.ok(draftCookie,'Sign-in issues a private draft device cookie');
+ const draftHeaders={...headers,Cookie:headers.Cookie+'; '+draftCookie};
+ phase='draft write';
+ assert.equal((await request('/api/drafts/farmer-registration',{method:'PUT',headers:draftHeaders,body:JSON.stringify({content:{full_name:'Unfinished form'}})})).status,200);
+ phase='draft read';
+ assert.equal((await (await request('/api/drafts/farmer-registration',{headers:draftHeaders})).json()).content.full_name,'Unfinished form');
+ phase='farmer workflow after draft';
 const created=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'HOSTED TEST ONLY',primary_phone:'TEST-PHONE-SEARCH',registered_by:'TEST',village_area:'TEST VILLAGE',county:'TEST COUNTY',location:'TEST LOCATION',sub_location:'TEST SUBLOCATION',sub_county:'TEST SUBCOUNTY',physical_address:'TEST ADDRESS',national_id:'PRIVATE-NATIONAL-ID',kra_pin:'PRIVATE-KRA-PIN',category:'Satima Farmers',contact:{full_name:'PRIVATE NEXT OF KIN',phone_number:'PRIVATE KIN PHONE',relationship:'TEST'},payment:{mpesa_registered_name:'PRIVATE MPESA NAME',mpesa_phone_number:'PRIVATE MPESA PHONE'}})});
 assert.equal(created.status,201);const farmer=await created.json();
  const kraPath='/api/kra-verification/'+farmer.id;
@@ -130,7 +144,10 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,Origin:'https://other.example','Content-Type':'image/png'},body:firstPhoto})).status,403);
  assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'text/plain'},body:firstPhoto})).status,415);
  assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'image/png'},body:Buffer.from('not an image')})).status,400);
- assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'image/png'},body:Buffer.alloc(2*1024*1024+1)})).status,413);
+ assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'image/png'},body:Buffer.alloc(10*1024*1024+1)})).status,413);
+ const largePhoto=Buffer.concat([firstPhoto.subarray(0,-12),pngChunk('tEXt',Buffer.concat([Buffer.from('Comment\0'),Buffer.alloc(2*1024*1024+1024,65)])),firstPhoto.subarray(-12)]);
+ assert.ok(largePhoto.length>2*1024*1024);
+ assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'image/png'},body:largePhoto})).status,200,'A valid photo larger than the old 2 MB limit uploads');
  assert.equal((await request(photoPath,{method:'PUT',headers:{...headers,'Content-Type':'image/png'},body:firstPhoto})).status,200);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers})).json()).has_photograph,true);
  const firstRead=await request(photoPath,{headers});assert.equal(firstRead.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await firstRead.arrayBuffer()),firstPhoto);
@@ -156,9 +173,15 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal(operationsWrongUsername.status,401);assert.equal(operationsWrongPassword.status,401);
  assert.equal((await operationsWrongUsername.json()).error,(await operationsWrongPassword.json()).error,'Operations login errors must not identify which credential was wrong');
  assert.equal((await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations-viewer',password:viewerSecret})})).status,401,'Old viewer username must be rejected');
+ phase='operations login';
  const viewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  assert.equal(viewerLogin.status,200);assert.match(viewerLogin.headers.get('set-cookie'),/HttpOnly.*SameSite=Strict.*Secure/);
  const viewerHeaders={Origin:'https://satima.example',Cookie:viewerLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+ assert.equal((await request('/api/operations/drafts/farmer-registration',{headers:viewerHeaders})).status,403);
+ const viewerDevice=viewerLogin.headers.get('set-cookie').match(/satima_draft_device=[a-f0-9]{64}/)?.[0];assert.ok(viewerDevice);
+ const viewerDraftHeaders={...viewerHeaders,Cookie:viewerHeaders.Cookie+'; '+viewerDevice};
+ assert.equal((await request('/api/operations/drafts/milk-collection',{method:'PUT',headers:viewerDraftHeaders,body:JSON.stringify({content:{quantity:'2.5'}})})).status,200);
+ assert.equal((await (await request('/api/operations/drafts/milk-collection',{headers:viewerDraftHeaders})).json()).content.quantity,'2.5');
  const customerDb=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await customerDb.connect();
  const customerOne=(await customerDb.query("INSERT INTO customers(full_name,physical_address,phone_number,source_sha256) VALUES('TEST ALPHA','TEST ADDRESS','0712345678',$1) RETURNING id,customer_id",['a'.repeat(64)])).rows[0];
  const customerTwo=(await customerDb.query("INSERT INTO customers(full_name,physical_address,phone_number,gender,source_sha256) VALUES('TEST BETA','SECOND ADDRESS',NULL,'female',$1) RETURNING id,customer_id",['a'.repeat(64)])).rows[0];
@@ -196,13 +219,14 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0',randomUUID()),body:milkImage})).status,400);
  assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',randomUUID(),'2030-01-01'),body:milkImage})).status,400);
  assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',randomUUID()),body:Buffer.from('not an image')})).status,400);
- const milkSaved=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:milkImage});assert.equal(milkSaved.status,201);
+ const milkSaved=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:largePhoto});assert.equal(milkSaved.status,201,'Milk evidence also accepts photos larger than 2 MB');
  const firstMilk=await milkSaved.json();assert.match(firstMilk.collection_id,/^MC\d{6}$/);
- const milkRepeat=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:milkImage});assert.equal(milkRepeat.status,200);assert.equal((await milkRepeat.json()).id,firstMilk.id);
+ const milkRepeat=await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.5',milkKey),body:largePhoto});assert.equal(milkRepeat.status,200);assert.equal((await milkRepeat.json()).id,firstMilk.id);
  assert.equal((await request('/api/operations/milk-collections',{method:'POST',headers:milkHeaders(viewerHeaders,'0.75',milkKey),body:milkImage})).status,409);
  const adminMilk=await request('/api/milk-collections',{method:'POST',headers:milkHeaders(headers,'0.75',randomUUID()),body:milkImage});assert.equal(adminMilk.status,201);
  const secondMilk=await adminMilk.json();assert.notEqual(secondMilk.collection_id,firstMilk.collection_id);
  const bothMilk=await (await request('/api/milk-collections',{headers})).json();assert.equal(bothMilk.pagination.total,2);assert.equal(bothMilk.total_liters,'1.250000');
+ const todayKpi=await (await request('/api/milk-collections?period=today',{headers})).json();assert.equal(todayKpi.pagination.total,2);assert.equal(todayKpi.total_liters,'1.250000');assert.equal(todayKpi.unique_farmers,1);
  const milkCategories=(await (await request('/api/milk-collections/summary',{headers})).json()).categories;
  assert.equal(milkCategories.find(item=>item.category==='Satima Farmers').deliveries,2);
  assert.deepEqual((await (await request('/api/operations/milk-collections/summary',{headers:viewerHeaders})).json()).categories,milkCategories);
@@ -214,7 +238,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await (await request('/api/milk-collections/'+firstMilk.id,{headers})).json()).farmer_id,farmer.id);
  const milkPhotoResponse=await request('/api/operations/milk-collections/'+firstMilk.id+'/photo',{headers:viewerHeaders});
  assert.equal(milkPhotoResponse.headers.get('cache-control'),'private, no-store');
- assert.deepEqual(Buffer.from(await milkPhotoResponse.arrayBuffer()),milkImage);
+ assert.deepEqual(Buffer.from(await milkPhotoResponse.arrayBuffer()),largePhoto);
  assert.equal((await request('/api/operations/milk-collections/'+firstMilk.id+'/photo')).status,401);
  assert.equal((await request('/api/operations/milk-collections/'+firstMilk.id,{method:'DELETE',headers:viewerHeaders})).status,403);
  assert.equal((await request('/api/operations/farmers',{method:'POST',headers:viewerHeaders,body:'{}'})).status,403);
@@ -281,6 +305,8 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await request(correctionPath,{method:'PUT',headers:viewerHeaders,body:JSON.stringify({collection_id:five.id,accepted_liters:'3',rejected_liters:'2',rejection_reason:'Contamination',inspected_on:milkDay,inspected_by:'Test Inspector',revision:fiveDetail.revision,idempotency_key:randomUUID()})})).status,409,'Stale quality correction is rejected');
   assert.equal((await request(processingBase+'/quality/'+fiveDetail.quality_id,{method:'PUT',headers,body:JSON.stringify({collection_id:five.id,accepted_liters:'3',rejected_liters:'2',rejection_reason:'Contamination',inspected_on:milkDay,inspected_by:'Test Inspector',revision:correction.revision,idempotency_key:randomUUID()})})).status,200);
   assert.equal((await (await request(processingBase+'/collections/'+five.id,{headers})).json()).accepted_liters,'3.000000');
+  const acceptedKpi=await (await request(processingBase+'/collections?metric=accepted',{headers})).json();assert.ok(acceptedKpi.records.some(row=>row.id===five.id));assert.ok(acceptedKpi.records.every(row=>Number(row.accepted_liters)>0));
+  const rejectedKpi=await (await request(operationsProcessing+'/collections?metric=rejected',{headers:viewerHeaders})).json();assert.ok(rejectedKpi.records.some(row=>row.id===eight.id));assert.ok(rejectedKpi.records.every(row=>Number(row.rejected_liters)>0));
   assert.equal((await (await request('/api/operations/milk-operation-audit/quality/'+fiveDetail.quality_id,{headers:viewerHeaders})).json()).length,3);
   const farmerHistory=await (await request(operationsProcessing.replace('/milk-processing','')+'/farmers/'+farmer.id+'/milk-processing',{headers:viewerHeaders})).json();
   assert.ok(Number(farmerHistory.totals.rejected_liters)>=10);
@@ -295,6 +321,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await request(processingBase+'/batches?sort=id',{headers})).status,200);
   assert.deepEqual(mixedDetail.allocations.map(row=>row.farmer_id).sort(),[farmer.id,secondFarmer.id].sort());
   assert.equal(mixedDetail.bottles_produced,20);assert.equal(mixedDetail.available_bottles,20);
+  assert.equal((await (await request(processingBase+'/batches?metric=processed',{headers})).json()).pagination.total,1);
   const distributionBase='/api/operations/milk-distribution';
   const {rows:[testParent]}=await testDb.query("INSERT INTO distributors(name,record_type,source_sha256) VALUES('Test Group','distributor',$1) RETURNING id",['a'.repeat(64)]);
   const {rows:[testStore]}=await testDb.query("INSERT INTO distributors(name,record_type,parent_id,source_sha256) VALUES('Test Store','store',$1,$2) RETURNING id",[testParent.id,'a'.repeat(64)]);
@@ -319,6 +346,8 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal(distributionResponse.status,201);const dispatched=await distributionResponse.json();
   assert.equal((await distribute(mixedBatch.id,10,'dispatched',distributionKey)).status,200);
   assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,10);
+  const distributedKpi=await (await request('/api/milk-distribution/records?metric=distributed',{headers})).json();assert.equal(distributedKpi.pagination.total,1,'Draft records do not count as distributed');
+  assert.equal((await (await request(processingBase+'/batches?metric=remaining',{headers})).json()).records[0].available_bottles,10);
   const dispatchDetail=await (await request(distributionBase+'/records/'+dispatched.id,{headers:viewerHeaders})).json();
   assert.equal(dispatchDetail.liters,'5.000000');
   const deliver=await request(distributionBase+'/records/'+dispatched.id,{method:'PATCH',headers:viewerHeaders,body:JSON.stringify({status:'delivered',revision:dispatchDetail.revision})});assert.equal(deliver.status,200);
@@ -504,21 +533,51 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  }finally{await restricted.end();}
  const removeLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(removeLogin.status,200);
  const removeHeaders={Origin:'https://satima.example',Cookie:removeLogin.headers.get('set-cookie').split(';')[0]};
+ const laterDevice=removeLogin.headers.get('set-cookie').match(/satima_draft_device=[a-f0-9]{64}/)?.[0];
+ const laterDraftHeaders={...removeHeaders,Cookie:removeHeaders.Cookie+'; '+laterDevice,'Content-Type':'application/json'};
+ assert.equal((await request('/api/drafts/farmer-registration',{method:'PUT',headers:laterDraftHeaders,body:JSON.stringify({content:{full_name:'Cross-process draft'}})})).status,200);
  // Run the complete suite against the disposable database and a local-mode server.
+ phase='separate process persistence';
  const localEnv={...env,RENDER:'false',PORT:'31988',CMS_PORT:'31988',TEST_ISOLATED_DATABASE:'1'};delete localEnv.PUBLIC_ORIGIN;
  localServer=spawn(process.execPath,['app/server.mjs'],{env:localEnv,stdio:['ignore','pipe','pipe']});
  for(let n=0;n<80;n++){try{if((await fetch('http://127.0.0.1:31988/health')).status===200)break;}catch{}await delay(100);}
  const localBase='http://127.0.0.1:31988';
  const localLogin=await fetch(localBase+'/api/login',{method:'POST',headers:{Origin:localBase,'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(localLogin.status,200);
  const localHeaders={Origin:localBase,Cookie:localLogin.headers.get('set-cookie').split(';')[0]};
+ assert.equal((await fetch(localBase+'/api/session',{headers:{Cookie:removeHeaders.Cookie}})).status,200,'A separate app process accepts the persistent session');
+ assert.equal((await (await fetch(localBase+'/api/drafts/farmer-registration',{headers:{Cookie:laterDraftHeaders.Cookie}})).json()).content.full_name,'Cross-process draft','A separate app process restores the draft');
  const afterRestart=await fetch(localBase+photoPath,{headers:localHeaders});assert.equal(afterRestart.status,200);assert.deepEqual(Buffer.from(await afterRestart.arrayBuffer()),replacementPhoto,'New app process reads the persisted photograph');
  assert.equal((await fetch(localBase+photoPath,{method:'DELETE',headers:localHeaders})).status,200);
  assert.equal((await request(photoPath,{headers:removeHeaders})).status,404);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers:removeHeaders})).json()).has_photograph,false);
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ assert.equal((await request('/api/logout',{method:'POST',headers:laterDraftHeaders,body:'{}'})).status,200);
+ assert.equal((await request('/api/session',{headers:removeHeaders})).status,401,'Explicit logout revokes the persistent session');
+ const expiredLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'admin',password:cmsSecret})});
+ const expiredCookie=expiredLogin.headers.get('set-cookie').split(';')[0];
+ const expiryOwner=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await expiryOwner.connect();
+ try{
+  await expiryOwner.query("UPDATE auth_sessions SET expires_at=now()-interval '1 second' WHERE token_hash=$1",[createHash('sha256').update(expiredCookie.split('=')[1]).digest('hex')]);
+  const deviceHash=createHash('sha256').update(laterDevice.split('=')[1]).digest('hex');
+  assert.equal((await expiryOwner.query('SELECT count(*)::int AS n FROM form_drafts WHERE device_hash=$1',[deviceHash])).rows[0].n,0,'Logout clears private drafts on this device');
+ }finally{await expiryOwner.end();}
+ assert.equal((await request('/api/session',{headers:{Cookie:expiredCookie}})).status,401,'Expired persistent sessions are rejected');
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ phase='private directory synchronization';
+ const privateDir=await mkdtemp(join(tmpdir(),'satima-sync-test-'));
+ try{
+  const file=join(privateDir,'customers.csv'),plan=join(privateDir,'preview.json');
+  await writeFile(file,'full_name,phone_number,physical_address,category\nFixture Customer,0712345679,Fixture Place,Current Customers\n');
+  const syncEnv={...env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`};
+  const sync=mode=>spawnSync(process.execPath,['app/scripts/sync-master.mjs',mode,'customers',file,plan],{env:syncEnv,encoding:'utf8'});
+  const preview=sync('preview');assert.equal(preview.status,0,preview.stderr);assert.equal(JSON.parse(preview.stdout).added,1);
+  const applied=sync('apply');assert.equal(applied.status,0,applied.stderr);assert.equal(JSON.parse(applied.stdout).added,1);
+  const repeated=sync('apply');assert.equal(repeated.status,0,repeated.stderr);assert.match(repeated.stdout,/already synchronized/);
+  const owner=new pg.Client({connectionString:syncEnv.ADMIN_DATABASE_URL});await owner.connect();
+  try{const {rows:[linked]}=await owner.query(`SELECT count(*)::int AS n FROM customers WHERE full_name='Fixture Customer'`);assert.equal(linked.n,1);}finally{await owner.end();}
+ }finally{await rm(privateDir,{recursive:true,force:true});}
 
  console.log('PASS: fresh migrations, repeat migrations, non-superuser owner, HTTPS origin, Secure cookies, login, register, edit, search, logout, SQL persistence and restricted-role protections.');
-}finally{
+}catch(error){console.error('Hosted test phase:',phase,'server running:',server?.exitCode===null,'server error:',serverLog.replaceAll(secret,'[redacted]').replaceAll(appSecret,'[redacted]').slice(-1800)||'none');throw error;}finally{
  if(localServer){localServer.kill('SIGTERM');await new Promise(resolve=>localServer.once('exit',resolve));}
  if(server){server.kill('SIGTERM');await new Promise(resolve=>server.once('exit',resolve));}
  if(db)await db.end();

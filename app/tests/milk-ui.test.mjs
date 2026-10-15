@@ -18,6 +18,7 @@ test('milk category cards open dedicated same-tab pages for both portals',()=>{
   assert.equal(route(`${base}/category/satima`,base).filter,'Satima Farmers');
   assert.equal(route(`${base}/awaiting-categorisation`,base).filter,'unassigned');
   assert.equal(route(base,base).filtered,false);
+  for(const metric of ['today','week','month','farmers-today'])assert.equal(route(`${base}/kpi/${metric}`,base).kpi,metric);
   assert.equal(route(`${base}/category/unknown`,base),null);
  }
  assert.equal((categoryCards(items.filter(item=>item.category!=='Awaiting Categorisation'),'/milk-collection').match(/class="supplier-category"/g)||[]).length,4);
