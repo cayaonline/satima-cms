@@ -9,6 +9,7 @@ window.initCustomerDirectory=function(api){
  const display=value=>value==null||value===''?'Not recorded':value;
  const categories={current:'Current Customers',lapsed:'Lapsed Customers (Expected to Resume Soon)','geographically-isolated':'Geographically Isolated',dormant:'Dormant / Non-Responsive',retired:'Retired'};
  const base=location.pathname.startsWith('/operations/')?'/operations/customers':'/customers';
+ const linkedCustomer=new URLSearchParams(location.search).get('customer');
  const slug=location.pathname.split('/category/')[1];
  const routeCategory=slug?categories[slug]:(location.pathname.endsWith('/awaiting-categorisation')?'unassigned':null);
  let page=1,sort='customer_id',direction='asc',pending=0,timer;
@@ -36,7 +37,7 @@ window.initCustomerDirectory=function(api){
   }catch(error){if(ticket===pending)table.innerHTML=`<div class="empty error">${esc(error.message)}</div>`;}
  }
  async function open(id){
-  try{const c=await api('/customers/'+encodeURIComponent(id));detail.innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(c.customer_id)}</span><h2>${esc(c.full_name)}</h2><small>${esc(c.category||'Awaiting Categorisation')} · Customer profile · Read-only</small></div><button class="icon-button" type="button" data-close-customer aria-label="Close customer profile">×</button></div><div class="dialog-body"><div class="card"><h3>Customer information</h3><dl>${field('Customer ID',c.customer_id)}${field('Customer Name',c.full_name)}${field('Customer Category',c.category||'Awaiting Categorisation')}${field('Gender',c.gender?c.gender[0].toUpperCase()+c.gender.slice(1):'Not specified')}${field('Phone Number',c.phone_number)}${field('Physical Address / Location',c.physical_address)}</dl></div></div>`;dialog.showModal();}
+  try{const c=await api('/customers/'+encodeURIComponent(id));detail.innerHTML=`<div class="dialog-head"><div class="detail-title"><span class="eyebrow">${esc(c.customer_id)}</span><h2>${esc(c.full_name)}</h2><small>${esc(c.category||'Awaiting Categorisation')} · Customer profile · Read-only</small></div><button class="icon-button" type="button" data-close-customer aria-label="Close customer profile">×</button></div><div class="dialog-body"><div class="card"><h3>Customer information</h3><dl>${field('Customer ID',c.customer_id)}${field('Customer Name',c.full_name)}${field('Customer Category',c.category||'Awaiting Categorisation')}${field('Gender',c.gender?c.gender[0].toUpperCase()+c.gender.slice(1):'Not specified')}${field('Phone Number',c.phone_number)}${field('Physical Address / Location',c.physical_address)}</dl></div></div>`;dialog.showModal();window.mountCustomerDistribution(c.id,api,detail.querySelector('.dialog-body'),base.startsWith('/operations'));}
   catch(error){table.innerHTML=`<div class="empty error">${esc(error.message)}</div>`;}
  }
  host.addEventListener('click',event=>{
@@ -51,4 +52,5 @@ window.initCustomerDirectory=function(api){
  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!content.hidden)load();});
  window.customerDirectory={load};
  load();
+ if(linkedCustomer&&/^[0-9a-f-]{36}$/i.test(linkedCustomer))open(linkedCustomer);
 };

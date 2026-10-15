@@ -48,6 +48,16 @@ const response=await request(route);assert.equal(response.status,200,route);asse
    assert.match(await response.text(),/id="kra-page-title"/,route);
   }
  }
+ for(const base of ['', '/operations']){
+  for(const path of ['/milk-processing','/milk-processing/new','/milk-processing/category/satima','/milk-processing/awaiting-categorisation','/milk-distribution','/milk-distribution/new']){
+   const response=await request(base+path);assert.equal(response.status,200,base+path);assert.match(await response.text(),/id="milk-operations-content"/);
+  }
+ }
+ assert.equal((await request('/milk-operations.js')).status,200);
+ assert.equal((await request('/api/milk-processing/collections')).status,401);
+ assert.equal((await request('/api/operations/milk-processing/collections')).status,401);
+ assert.equal((await request('/api/milk-distribution/records')).status,401);
+ assert.equal((await request('/api/operations/milk-distribution/records')).status,401);
  for(const base of ['/milk-collection','/operations/milk-collection']){
   for(const slug of ['satima','larger-sagana','kangema','others']){
    const route=base+'/category/'+slug,response=await request(route);
@@ -231,6 +241,91 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   const elevatedHeaders={Origin:'https://satima.example',Cookie:elevatedLogin.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
   const secondResponse=await request('/api/farmers',{method:'POST',headers,body:JSON.stringify({full_name:'SECOND ARCHIVE TEST',primary_phone:'SECOND-PHONE',registered_by:'TEST',category:'Others'})});
   assert.equal(secondResponse.status,201);const secondFarmer=await secondResponse.json();
+  // Processing and distribution use the disposable database only.
+  const processingBase='/api/milk-processing',operationsProcessing='/api/operations/milk-processing';
+  const newCollection=async(farmerId,litersValue)=>{
+   const response=await request('/api/operations/milk-collections',{method:'POST',headers:{...milkHeaders(viewerHeaders,litersValue,randomUUID()),'X-Farmer-Id':farmerId},body:milkImage});
+   assert.equal(response.status,201);return response.json();
+  };
+  const five=await newCollection(farmer.id,'5'),seven=await newCollection(secondFarmer.id,'7'),ten=await newCollection(farmer.id,'10'),eight=await newCollection(farmer.id,'8');
+  const orderedCollections=await (await request('/api/milk-processing/collections?sort=id',{headers})).json();
+  assert.deepEqual(orderedCollections.records.map(row=>row.collection_id),orderedCollections.records.map(row=>row.collection_id).sort());
+  assert.equal((await request('/api/milk-processing/collections?sort=bad',{headers})).status,400);
+  assert.equal((await request(processingBase+'/collections')).status,401);
+  assert.equal((await request(operationsProcessing+'/collections',{headers})).status,401);
+  assert.equal((await request('/api/operations/farmers',{method:'POST',headers:viewerHeaders,body:'{}'})).status,403);
+  const saveCheck=async(collection,accepted,rejected,reason='',session=viewerHeaders)=>request(operationsProcessing+'/quality',{method:'POST',headers:session,body:JSON.stringify({collection_id:collection.id,accepted_liters:accepted,rejected_liters:rejected,rejection_reason:reason,inspected_on:milkDay,inspected_by:'Test Inspector',idempotency_key:randomUUID()})});
+  assert.equal((await saveCheck(five,'4','2','Contamination')).status,400,'Accepted and rejected must equal received');
+  assert.equal((await saveCheck(five,'3','-2','Contamination')).status,400,'Negative rejection is invalid');
+  assert.equal((await saveCheck(five,'3','2')).status,400,'A rejection reason is required');
+  assert.equal((await saveCheck(five,'3','2','Other')).status,400,'Other needs a note');
+  assert.equal((await saveCheck(five,'3','2','Contamination')).status,201);
+  assert.equal((await saveCheck(seven,'7','0')).status,201);
+  assert.equal((await saveCheck(ten,'10','0')).status,201);
+  assert.equal((await saveCheck(eight,'0','8','Spoilage')).status,201);
+  const fiveDetail=await (await request(processingBase+'/collections/'+five.id,{headers})).json();
+  assert.equal(fiveDetail.accepted_liters,'3.000000');assert.equal(fiveDetail.rejected_liters,'2.000000');
+  const correctionPath=operationsProcessing+'/quality/'+fiveDetail.quality_id;
+  const corrected=await request(correctionPath,{method:'PUT',headers:viewerHeaders,body:JSON.stringify({collection_id:five.id,accepted_liters:'2',rejected_liters:'3',rejection_reason:'Contamination',notes:'Retested against original delivery',inspected_on:milkDay,inspected_by:'Test Inspector',revision:fiveDetail.revision,idempotency_key:randomUUID()})});
+  assert.equal(corrected.status,200,corrected.status===200?'':await corrected.text());const correction=await corrected.json();
+  assert.equal((await request(correctionPath,{method:'PUT',headers:viewerHeaders,body:JSON.stringify({collection_id:five.id,accepted_liters:'3',rejected_liters:'2',rejection_reason:'Contamination',inspected_on:milkDay,inspected_by:'Test Inspector',revision:fiveDetail.revision,idempotency_key:randomUUID()})})).status,409,'Stale quality correction is rejected');
+  assert.equal((await request(processingBase+'/quality/'+fiveDetail.quality_id,{method:'PUT',headers,body:JSON.stringify({collection_id:five.id,accepted_liters:'3',rejected_liters:'2',rejection_reason:'Contamination',inspected_on:milkDay,inspected_by:'Test Inspector',revision:correction.revision,idempotency_key:randomUUID()})})).status,200);
+  assert.equal((await (await request(processingBase+'/collections/'+five.id,{headers})).json()).accepted_liters,'3.000000');
+  assert.equal((await (await request('/api/operations/milk-operation-audit/quality/'+fiveDetail.quality_id,{headers:viewerHeaders})).json()).length,3);
+  const farmerHistory=await (await request(operationsProcessing.replace('/milk-processing','')+'/farmers/'+farmer.id+'/milk-processing',{headers:viewerHeaders})).json();
+  assert.ok(Number(farmerHistory.totals.rejected_liters)>=10);
+  const createBatch=(allocations,processed,bottled,size,bottles,key=randomUUID())=>request(operationsProcessing+'/batches',{method:'POST',headers:viewerHeaders,body:JSON.stringify({processed_on:milkDay,allocations,processed_liters:processed,bottled_liters:bottled,bottle_size_ml:size,bottles_produced:bottles,product_format:'Fresh milk',operator_name:'Test Processor',idempotency_key:key})});
+  assert.equal((await createBatch([{collection_id:eight.id,quantity_liters:'1'}],'1','1',500,2)).status,409,'Rejected milk cannot enter processing');
+  assert.equal((await createBatch([{collection_id:five.id,quantity_liters:'4'}],'4','4',500,8)).status,409,'Cannot allocate more than accepted');
+  const batchKey=randomUUID(),batchResponse=await createBatch([{collection_id:five.id,quantity_liters:'3'},{collection_id:seven.id,quantity_liters:'7'}],'10','10',500,20,batchKey);
+  assert.equal(batchResponse.status,201);const mixedBatch=await batchResponse.json();
+  assert.equal((await createBatch([{collection_id:five.id,quantity_liters:'3'},{collection_id:seven.id,quantity_liters:'7'}],'10','10',500,20,batchKey)).status,200,'Retry does not duplicate batch');
+  assert.equal((await createBatch([{collection_id:five.id,quantity_liters:'1'}],'1','1',500,2)).status,409,'Previously allocated milk cannot be allocated again');
+  const mixedDetail=await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json();
+  assert.equal((await request(processingBase+'/batches?sort=id',{headers})).status,200);
+  assert.deepEqual(mixedDetail.allocations.map(row=>row.farmer_id).sort(),[farmer.id,secondFarmer.id].sort());
+  assert.equal(mixedDetail.bottles_produced,20);assert.equal(mixedDetail.available_bottles,20);
+  const distributionBase='/api/operations/milk-distribution';
+  const distribute=(batchId,countValue,statusValue,submitKey=randomUUID())=>request(distributionBase+'/records',{method:'POST',headers:viewerHeaders,body:JSON.stringify({batch_id:batchId,customer_id:customerOne.id,distributed_on:milkDay,bottles:countValue,status:statusValue,operator_name:'Test Dispatcher',idempotency_key:submitKey})});
+  assert.equal((await distribute(randomUUID(),1,'dispatched')).status,404);
+  assert.equal((await distribute(mixedBatch.id,21,'dispatched')).status,409,'Cannot dispatch more than produced');
+  const distributionKey=randomUUID(),distributionResponse=await distribute(mixedBatch.id,10,'dispatched',distributionKey);
+  assert.equal(distributionResponse.status,201);const dispatched=await distributionResponse.json();
+  assert.equal((await distribute(mixedBatch.id,10,'dispatched',distributionKey)).status,200);
+  assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,10);
+  const dispatchDetail=await (await request(distributionBase+'/records/'+dispatched.id,{headers:viewerHeaders})).json();
+  assert.equal(dispatchDetail.liters,'5.000000');
+  const deliver=await request(distributionBase+'/records/'+dispatched.id,{method:'PATCH',headers:viewerHeaders,body:JSON.stringify({status:'delivered',revision:dispatchDetail.revision})});assert.equal(deliver.status,200);
+  assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,10,'Delivery must not deduct inventory twice');
+  assert.equal((await request(distributionBase+'/records/'+dispatched.id,{method:'PATCH',headers:viewerHeaders,body:JSON.stringify({status:'cancelled',revision:dispatchDetail.revision})})).status,409,'Stale corrections are rejected');
+  assert.equal((await (await request(distributionBase+'/records?customer='+customerOne.id,{headers:viewerHeaders})).json()).pagination.total,1);
+  assert.equal((await (await request('/api/customers/'+customerOne.id+'/milk-distributions',{headers})).json()).pagination.total,1);
+  assert.equal((await (await request('/api/milk-distribution/summary',{headers})).json()).totals.remaining_liters,'5.000000');
+  assert.equal((await request('/api/operations/milk-operation-audit/distribution/'+dispatched.id,{headers:viewerHeaders})).status,200);
+  const latestDistribution=await (await request('/api/milk-distribution/records/'+dispatched.id,{headers})).json();
+  assert.equal(latestDistribution.status,'delivered','Admin sees the Operations status immediately');
+  assert.equal((await request(distributionBase+'/records/'+dispatched.id,{method:'PATCH',headers:viewerHeaders,body:JSON.stringify({status:'cancelled',revision:latestDistribution.revision})})).status,409,'Delivered product cannot return to stock without a return workflow');
+  const cancelResponse=await distribute(mixedBatch.id,4,'dispatched');assert.equal(cancelResponse.status,201);
+  assert.equal((await request(distributionBase+'/records?sort=id',{headers:viewerHeaders})).status,200);
+  assert.equal((await request(distributionBase+'/records?sort=bad',{headers:viewerHeaders})).status,400);
+  const cancellation=await cancelResponse.json(),cancelDetail=await (await request(distributionBase+'/records/'+cancellation.id,{headers:viewerHeaders})).json();
+  assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,6);
+  assert.equal((await request(distributionBase+'/records/'+cancellation.id,{method:'PATCH',headers:viewerHeaders,body:JSON.stringify({status:'cancelled',revision:cancelDetail.revision})})).status,200);
+  assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,10,'Cancellation restores undistributed inventory');
+  assert.equal((await (await request('/api/milk-distribution/records/'+cancellation.id,{headers})).json()).status,'cancelled');
+  const competing=await Promise.all([distribute(mixedBatch.id,8,'dispatched'),distribute(mixedBatch.id,8,'dispatched')]);
+  assert.deepEqual(competing.map(r=>r.status).sort(),[201,409],'Concurrent dispatches cannot overallocate inventory');
+  assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_bottles,2);
+
+  assert.equal((await request('/api/operations/farmers/'+farmer.id,{method:'PUT',headers:viewerHeaders,body:'{}'})).status,403);
+  // Restore the older test fixture before its one-farmer assertions run.
+  await testDb.query('DELETE FROM milk_operation_audit');
+  await testDb.query('DELETE FROM milk_distributions');
+  await testDb.query('DELETE FROM milk_batch_allocations');
+  await testDb.query('DELETE FROM milk_processing_batches');
+  await testDb.query('DELETE FROM milk_quality_checks');
+  await testDb.query('DELETE FROM milk_collection_photos WHERE collection_id=ANY($1::uuid[])',[[five.id,seven.id,ten.id,eight.id]]);
+  await testDb.query('DELETE FROM milk_collections WHERE id=ANY($1::uuid[])',[[five.id,seven.id,ten.id,eight.id]]);
   const sourcePdf=await PDFDocument.create();for(let index=0;index<4;index++)sourcePdf.addPage([400,600]);const originalBytes=Buffer.from(await sourcePdf.save());
   const archiveUpload='/api/archives',firstDocs='/api/farmers/'+farmer.id+'/registration-documents',secondDocs='/api/farmers/'+secondFarmer.id+'/registration-documents';
   const uploadHeaders={...headers,'Content-Type':'application/pdf','Content-Length':String(originalBytes.length),'X-Archive-Batch-Id':'BATCH-TEST','X-Archive-Batch-Name':'Test registration archive','X-Archive-Expected-Count':'2','X-Archive-Filename':'original.pdf'};
@@ -378,7 +473,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await fetch(localBase+photoPath,{method:'DELETE',headers:localHeaders})).status,200);
  assert.equal((await request(photoPath,{headers:removeHeaders})).status,404);
  assert.equal((await (await request('/api/farmers/'+farmer.id,{headers:removeHeaders})).json()).has_photograph,false);
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
 
  console.log('PASS: fresh migrations, repeat migrations, non-superuser owner, HTTPS origin, Secure cookies, login, register, edit, search, logout, SQL persistence and restricted-role protections.');
 }finally{
