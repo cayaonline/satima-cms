@@ -41,7 +41,8 @@ export async function createArchiveBatch(meta,pdf){
 }
 
 export async function listArchiveBatches(){
- const {rows}=await pool.query(`SELECT b.id,b.name,b.original_filename,b.sha256,b.page_count,b.expected_farmer_count,b.document_status,b.archived_at,
+ const {rows}=await pool.query(`SELECT b.id,b.name,b.original_filename,b.sha256,b.page_count,b.expected_farmer_count,b.document_status,b.archived_at,b.supersedes_batch_id,
+  EXISTS(SELECT 1 FROM registration_archive_batches newer WHERE newer.supersedes_batch_id=b.id) AS superseded,
   count(e.id)::int AS identified_forms,count(e.id) FILTER(WHERE e.farmer_id IS NOT NULL AND e.verification_status IN ('matched','verified'))::int AS matched_forms,
   count(e.id) FILTER(WHERE e.farmer_id IS NULL)::int AS unassigned_forms
   FROM registration_archive_batches b LEFT JOIN registration_archive_entries e ON e.batch_id=b.id GROUP BY b.id ORDER BY b.archived_at DESC`);
@@ -76,8 +77,8 @@ export async function importArchiveBatch(meta,pdf,entries,existingClient=null){
   const {rows:[existing]}=await client.query('SELECT id,sha256 FROM registration_archive_batches WHERE id=$1',[meta.id]);
   if(existing&&existing.sha256!==pdf.checksum)throw new Problem(409,'Batch ID already belongs to a different PDF.');
   if(!existing){
-   await client.query(`INSERT INTO registration_archive_batches(id,name,original_filename,sha256,pdf_data,page_count,expected_farmer_count,uploaded_by)
-    VALUES($1,$2,$3,$4,$5,$6,$7,'administrator')`,[meta.id,meta.name,meta.filename,pdf.checksum,pdf.bytes,pdf.pageCount,meta.expected]);
+   await client.query(`INSERT INTO registration_archive_batches(id,name,original_filename,sha256,pdf_data,page_count,expected_farmer_count,uploaded_by,supersedes_batch_id)
+    VALUES($1,$2,$3,$4,$5,$6,$7,'administrator',$8)`,[meta.id,meta.name,meta.filename,pdf.checksum,pdf.bytes,pdf.pageCount,meta.expected,meta.supersedesBatchId||null]);
    await client.query("INSERT INTO registration_archive_events(batch_id,actor_role,action) VALUES($1,'administrator','upload')",[meta.id]);
   }
   let inserted=0,skipped=0;
@@ -133,7 +134,8 @@ export async function farmerArchiveDocuments(farmerId,viewer=false){
  const {rows}=await pool.query(`SELECT e.id,e.batch_id,e.page_start,e.page_end,e.verification_status,e.associated_at,
   b.name AS batch_name,b.original_filename,b.archived_at,b.document_status
   FROM registration_archive_entries e JOIN registration_archive_batches b ON b.id=e.batch_id
-  WHERE e.farmer_id=$1 ${viewer?"AND e.verification_status IN ('matched','verified')":''} ORDER BY b.archived_at DESC,e.page_start`,[farmerId]);
+  WHERE e.farmer_id=$1 AND NOT EXISTS(SELECT 1 FROM registration_archive_batches newer WHERE newer.supersedes_batch_id=b.id)
+  ${viewer?"AND e.verification_status IN ('matched','verified')":''} ORDER BY b.archived_at DESC,e.page_start`,[farmerId]);
  return rows;
 }
 

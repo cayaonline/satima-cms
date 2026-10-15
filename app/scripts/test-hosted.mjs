@@ -1,6 +1,6 @@
 // Uses a disposable PostgreSQL container; never connects to the local CMS database.
 import {spawnSync,spawn} from 'node:child_process';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import http from 'node:http';
@@ -366,6 +366,19 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await request('/api/archives/BATCH-TEST/original.pdf',{headers:elevatedHeaders})).status,401);
   assert.equal((await (await request(secondDocs,{headers})).json()).length,1);
   assert.equal((await testDb.query("SELECT count(*)::int AS count FROM registration_archive_events WHERE batch_id='BATCH-TEST' AND action='view'")).rows[0].count,3);
+  const revisedPdf=await PDFDocument.create();for(let index=0;index<5;index++)revisedPdf.addPage([400,600]);
+  const revisedBytes=Buffer.from(await revisedPdf.save());
+  await testDb.query(`INSERT INTO registration_archive_batches(id,name,original_filename,sha256,pdf_data,page_count,expected_farmer_count,uploaded_by,supersedes_batch_id)
+   VALUES('BATCH-TEST-R2','Corrected test archive','updated.pdf',$1,$2,5,2,'administrator','BATCH-TEST')`,
+   [createHash('sha256').update(revisedBytes).digest('hex'),revisedBytes]);
+  await testDb.query(`INSERT INTO registration_archive_entries(batch_id,farmer_id,page_start,page_end,verification_status,isolated_pdf,isolated_sha256,associated_by)
+   SELECT 'BATCH-TEST-R2',farmer_id,1,2,verification_status,isolated_pdf,isolated_sha256,'administrator'
+   FROM registration_archive_entries WHERE id=$1`,[firstEntry.id]);
+  const currentDocs=await (await request(firstDocs,{headers})).json();
+  assert.equal(currentDocs.length,1,'Farmer profile shows only the current archive revision');
+  assert.equal(currentDocs[0].batch_id,'BATCH-TEST-R2');
+  assert.equal((await (await request('/api/archives',{headers})).json()).find(item=>item.id==='BATCH-TEST').superseded,true);
+  assert.equal((await (await request('/api/operations/farmers/'+farmer.id+'/registration-documents',{headers:elevatedHeaders})).json()).length,1);
   // Keep the older directory suite's one-farmer fixture intact. This is an isolated test database.
   await testDb.query('DELETE FROM registration_archive_events WHERE entry_id=$1',[secondEntry.id]);
   await testDb.query('DELETE FROM registration_archive_entries WHERE id=$1',[secondEntry.id]);

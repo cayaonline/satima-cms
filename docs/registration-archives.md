@@ -62,3 +62,18 @@ node app/scripts/import-batch-registrations.mjs /absolute/private/path/batch2-ma
 ```
 
 The supplier PDF category and gender reconciliation is separate: `app/scripts/import-supplier-attributes.mjs` accepts a reviewed private row-to-farmer plan and the original PDF. It updates only strong matches, preserves uncertain rows for review, and leaves birth date and language blank when the source leaves them blank. Neither script adds confidential source files to Git.
+
+## Corrected Batch 2 master
+
+The revised 26-page master is stored as `BATCH-002-R2`, with `BATCH-002` retained as immutable history. Its public repository metadata is in `data/reference/batch-002-revision.json`; neither the PDF nor the identifying import manifest is committed. The revised master includes the original 12 two-page scans, shifted by two pages, plus one new two-page form. The previous scans were compared byte-for-byte at the embedded-image level before import. Farmer profiles show only the current archive revision, while administrators can still inspect both masters in Registration Archives.
+
+`app/scripts/import-batch2-revision.mjs` accepts a privately reviewed manifest. It verifies the PDF checksum, prior archive checksum, page counts, complete original associations, existing Farmer ID holder, and potential duplicate identifiers. On `apply`, one owner transaction reassigns the existing `SF-F-0001` holder to the next generated Farmer ID, creates the newly supplied farmer at `SF-F-0001`, records the source and review notes, and archives the corrected master with 13 protected two-page extracts. The UUID and linked records of the existing farmer remain intact. Both Farmer ID changes are captured in the existing audit trail. The identity protection trigger is temporarily disabled only inside that locked owner transaction and is restored before commit. A complete repeated import is a no-op; any conflicting state aborts the transaction.
+
+Run the check first, using an owner connection supplied privately, then apply only after verifying a fresh encrypted production backup and restoring it to an isolated test database:
+
+```bash
+node app/scripts/import-batch2-revision.mjs /absolute/private/path/revision-manifest.json
+node app/scripts/import-batch2-revision.mjs /absolute/private/path/revision-manifest.json apply
+```
+
+The new form's nine-digit primary mobile is retained exactly as supplied and flagged for confirmation. A paper verification checkbox does not update the independent KRA verification workflow. Preserve the original signed PDF and confirm outstanding identity and contact details with the farmer.

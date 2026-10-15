@@ -1,0 +1,10 @@
+{
+  "batch_id": "BATCH-002-R2",
+  "supersedes_batch_id": "BATCH-002",
+  "name": "Original Farmer Registration — Batch 2 (Updated)",
+  "page_count": 26,
+  "expected_farmer_count": 13,
+  "source_sha256": "406fd9e72234157292189b8e8dd14351086264f34961eefee611f1da5d35aa91",
+  "storage": "Private PostgreSQL registration archive",
+  "note": "The confidential original PDF and identifying import manifest are excluded from this public repository."
+}
