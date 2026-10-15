@@ -5,7 +5,9 @@ const sorts={
  full_name:'lower(f.full_name)',
  registration_date:'f.registration_date',
  created_at:'f.created_at',
- category:'f.category'
+ category:'f.category',
+ date_of_birth:'f.date_of_birth',
+ preferred_language:'f.preferred_language'
 };
 const registration="CASE WHEN f.registration_status='registered' THEN 'registered' ELSE 'not_registered' END";
 
@@ -21,9 +23,9 @@ export function operationsDirectoryQuery(params){
  if(category)conditions.push('f.category='+bind(category));
  if(filter)conditions.push(registration+'='+bind(filter));
  if(gender)conditions.push('f.gender='+bind(gender));
- if(q){const term=bind(q.toLowerCase()),genderTerm=q.toLowerCase().replaceAll(' ','_');conditions.push('('+[...['customer_id','full_name','registered_business_name','primary_phone','kra_pin','village_area','location','county'].map(field=>`position(${term} in lower(coalesce(f.${field},'')))>0`),...(farmerGenders.includes(genderTerm)?['f.gender='+bind(genderTerm)]:[])].join(' OR ')+')');}
+ if(q){const term=bind(q.toLowerCase()),genderTerm=q.toLowerCase().replaceAll(' ','_'),validDate=/^\d{4}-\d{2}-\d{2}$/.test(q)&&!Number.isNaN(Date.parse(q))&&new Date(q).toISOString().slice(0,10)===q;conditions.push('('+[...['customer_id','full_name','registered_business_name','primary_phone','kra_pin','village_area','location','county','preferred_language'].map(field=>`position(${term} in lower(coalesce(f.${field},'')))>0`),...(farmerGenders.includes(genderTerm)?['f.gender='+bind(genderTerm)]:[]),...(validDate?['f.date_of_birth='+bind(q)+'::date']:[])].join(' OR ')+')');}
  const limit=bind(pageSize),offset=bind((page-1)*pageSize);
- const sql=`WITH filtered AS MATERIALIZED (SELECT f.id,f.customer_id,f.category,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.village_area,f.location,f.county,f.registration_date,f.created_at,${registration} AS registration_status FROM farmers f WHERE ${conditions.join(' AND ')}),
+ const sql=`WITH filtered AS MATERIALIZED (SELECT f.id,f.customer_id,f.category,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.date_of_birth,f.preferred_language,f.village_area,f.location,f.county,f.registration_date,f.created_at,${registration} AS registration_status FROM farmers f WHERE ${conditions.join(' AND ')}),
  stats AS (SELECT count(*)::int AS total,
  count(*) FILTER(WHERE registration_status='registered')::int AS registered,
  count(*) FILTER(WHERE registration_status='not_registered')::int AS not_registered,
@@ -31,7 +33,7 @@ export function operationsDirectoryQuery(params){
  'Larger Sagana Farmers',count(*) FILTER(WHERE category='Larger Sagana Farmers'),
  'Kangema Farmers',count(*) FILTER(WHERE category='Kangema Farmers'),
  'Others',count(*) FILTER(WHERE category='Others')) AS categories FROM filtered),
- paged AS (SELECT f.id,f.customer_id,f.category,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.village_area,f.location,f.county,f.registration_status,f.registration_date::text FROM filtered f ORDER BY ${sorts[sort]} ${direction} NULLS LAST,f.id ${direction} LIMIT ${limit} OFFSET ${offset})
+ paged AS (SELECT f.id,f.customer_id,f.category,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.date_of_birth::text,f.preferred_language,f.village_area,f.location,f.county,f.registration_status,f.registration_date::text FROM filtered f ORDER BY ${sorts[sort]} ${direction} NULLS LAST,f.id ${direction} LIMIT ${limit} OFFSET ${offset})
  SELECT row_to_json(stats) AS stats,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS farmers FROM stats`;
  return {sql,values,page,pageSize,sort,direction};
 }
@@ -42,7 +44,7 @@ export async function listOperationsFarmers(pool,params){
 }
 
 export async function operationsFarmerDetail(pool,id){
- const {rows:[farmer]}=await pool.query(`SELECT f.id,f.customer_id,f.category,f.full_name,f.registered_business_name,f.primary_phone,f.kra_pin,f.gender,
+ const {rows:[farmer]}=await pool.query(`SELECT f.id,f.customer_id,f.category,f.full_name,f.registered_business_name,f.primary_phone,f.kra_pin,f.gender,f.date_of_birth::text,f.preferred_language,
  f.village_area,f.sub_location,f.location,f.sub_county,f.county,f.registration_date::text,
  ${registration} AS registration_status,EXISTS(SELECT FROM farmer_photographs p WHERE p.farmer_id=f.id) AS has_photograph
  FROM farmers f WHERE f.id=$1 AND f.record_kind='registered'`,[id]);

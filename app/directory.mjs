@@ -1,5 +1,5 @@
 import {Problem,farmerCategories,farmerGenders} from './store.mjs';
-const sorts={customer_id:"substring(f.customer_id from 6)::numeric",full_name:'lower(f.full_name)',registration_date:'f.registration_date',status:'f.status::text',created_at:'f.created_at'};
+const sorts={customer_id:"substring(f.customer_id from 6)::numeric",full_name:'lower(f.full_name)',registration_date:'f.registration_date',date_of_birth:'f.date_of_birth',preferred_language:'f.preferred_language',status:'f.status::text',created_at:'f.created_at'};
 const statuses=['pending_verification','active','inactive','suspended'];
 const escapeLike=s=>s.replace(/[\\%_]/g,'\\$&');
 export function directoryQuery(params){
@@ -23,7 +23,7 @@ export function directoryQuery(params){
  if(q){const noteCount=q.match(/^(\d+)\s+open$/i);if(noteCount)conditions.push(count+'='+bind(Number(noteCount[1])));
  else if(/^open$/i.test(q))conditions.push(count+'>0');
  else if(/^no open notes$/i.test(q))conditions.push(count+'=0');
- else{const p=bind('%'+escapeLike(q.toLowerCase())+'%'),genderTerm=q.toLowerCase().replaceAll(' ','_');const dateMatch=/^\d{4}-\d{2}-\d{2}$/.test(q)&&!Number.isNaN(Date.parse(q))&&new Date(q).toISOString().slice(0,10)===q;conditions.push('(f.search_text LIKE '+p+" ESCAPE E'\\\\' OR lower(coalesce(f.kra_pin,'')) LIKE "+p+" ESCAPE E'\\\\'"+(farmerGenders.includes(genderTerm)?' OR f.gender='+bind(genderTerm):'')+(dateMatch?' OR f.registration_date='+bind(q)+'::date':'')+')');}}
+ else{const p=bind('%'+escapeLike(q.toLowerCase())+'%'),genderTerm=q.toLowerCase().replaceAll(' ','_');const dateMatch=/^\d{4}-\d{2}-\d{2}$/.test(q)&&!Number.isNaN(Date.parse(q))&&new Date(q).toISOString().slice(0,10)===q;conditions.push('(f.search_text LIKE '+p+" ESCAPE E'\\\\' OR lower(coalesce(f.kra_pin,'')) LIKE "+p+" ESCAPE E'\\\\' OR lower(coalesce(f.preferred_language,'')) LIKE "+p+" ESCAPE E'\\\\'"+(farmerGenders.includes(genderTerm)?' OR f.gender='+bind(genderTerm):'')+(dateMatch?' OR f.registration_date='+bind(q)+'::date OR f.date_of_birth='+bind(q)+'::date':'')+')');}}
  const order=sorts[sort]+' '+direction+' NULLS LAST,f.id '+direction;
  const limit=bind(pageSize),offset=bind((page-1)*pageSize);
  const sql=`WITH filtered AS MATERIALIZED (SELECT f.* FROM farmers f WHERE ${conditions.join(' AND ')||'true'}),
@@ -38,7 +38,7 @@ export function directoryQuery(params){
  'Larger Sagana Farmers',count(*) FILTER(WHERE category='Larger Sagana Farmers' AND record_kind='registered'),
  'Kangema Farmers',count(*) FILTER(WHERE category='Kangema Farmers' AND record_kind='registered'),
  'Others',count(*) FILTER(WHERE category='Others' AND record_kind='registered')) AS categories FROM filtered),
- paged AS (SELECT f.id,f.customer_id,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.county,f.village_area,f.status,f.record_kind,f.registration_status,f.category,f.registration_date::text,${count} AS open_issues FROM filtered f ORDER BY ${order} LIMIT ${limit} OFFSET ${offset})
+ paged AS (SELECT f.id,f.customer_id,f.full_name,f.primary_phone,f.kra_pin,f.gender,f.date_of_birth::text,f.preferred_language,f.county,f.village_area,f.status,f.record_kind,f.registration_status,f.category,f.registration_date::text,${count} AS open_issues FROM filtered f ORDER BY ${order} LIMIT ${limit} OFFSET ${offset})
  SELECT row_to_json(stats) AS stats,coalesce((SELECT json_agg(paged) FROM paged),'[]'::json) AS farmers FROM stats`;
  return {sql,values,page,pageSize,sort,direction};
 }

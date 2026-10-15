@@ -2,9 +2,16 @@ import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {directoryQuery,listFarmers} from '../directory.mjs';
 import {listOperationsFarmers} from '../operations-directory.mjs';
-import {pool,createFarmer,updateFarmer} from '../store.mjs';
+import {pool,createFarmer,updateFarmer,optionalFarmerAttributes,genderEvidence} from '../store.mjs';
 after(()=>pool.end());
 const params=o=>new URLSearchParams(o);
+test('optional farmer attributes retain unknowns and accept only documented values',()=>{
+ assert.deepEqual(optionalFarmerAttributes({}),{date_of_birth:null,preferred_language:null});
+ assert.deepEqual(optionalFarmerAttributes({date_of_birth:'1990-04-05',preferred_language:'Kiswahili'}),{date_of_birth:'1990-04-05',preferred_language:'Kiswahili'});
+ for(const date of ['2026-02-30','invalid',123])assert.throws(()=>optionalFarmerAttributes({date_of_birth:date}),error=>error.status===400);
+ assert.throws(()=>optionalFarmerAttributes({preferred_language:'French'}),error=>error.status===400);
+ assert.equal(genderEvidence({gender:'female',gender_source:'supplier_document'}).gender_source,'supplier_document');
+});
 test('gender stays unverified until sourced and filters are exact in both portals',{skip:process.env.TEST_ISOLATED_DATABASE!=='1'},async()=>{
  const c=await pool.connect();await c.query('BEGIN');try{
   const a=await createFarmer(c,{full_name:'ISOLATED GENDER A',primary_phone:'GENDER-A',registered_by:'TEST',category:'Others'});

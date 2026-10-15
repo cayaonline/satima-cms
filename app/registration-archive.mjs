@@ -68,10 +68,10 @@ async function isolatedPdf(bytes,start,end){
 
 // Used by the private, repeatable import command. A single transaction keeps
 // the original and every reviewed page association consistent on first import.
-export async function importArchiveBatch(meta,pdf,entries){
+export async function importArchiveBatch(meta,pdf,entries,existingClient=null){
  const source=await PDFDocument.load(pdf.bytes,{updateMetadata:false});
  if(source.getPageCount()!==pdf.pageCount)throw new Problem(400,'PDF page count changed.');
- return transaction(async client=>{
+ const importWithClient=async client=>{
   await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[meta.id]);
   const {rows:[existing]}=await client.query('SELECT id,sha256 FROM registration_archive_batches WHERE id=$1',[meta.id]);
   if(existing&&existing.sha256!==pdf.checksum)throw new Problem(409,'Batch ID already belongs to a different PDF.');
@@ -95,7 +95,8 @@ export async function importArchiveBatch(meta,pdf,entries){
    inserted++;
   }
   return {inserted,skipped};
- },'Registration archive import');
+ };
+ return existingClient?importWithClient(existingClient):transaction(importWithClient,'Registration archive import');
 }
 
 export async function saveArchiveEntry(batchId,input,entryId=null){

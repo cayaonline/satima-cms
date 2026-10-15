@@ -49,3 +49,16 @@ A private manifest uses this shape:
 The observed fields are never written to the archive tables. Matching requires an exact existing identifier, exact phone, or exact full name corroborated by the expected Farmer ID. An `existing_source` object with `document_name`, `first_page`, and `last_page` can confirm a prior document-to-farmer association after visual comparison of the scans. Mark a form `hold_for_review: true` to prevent automatic association. Re-running an identical import skips its already-stored entries; a changed checksum or association stops with an error. For a new batch, no source-code change is needed.
 
 Before applying a migration or import in production, verify a fresh encrypted PostgreSQL backup and its SHA-256 sidecar. Keep the backup key separately. Test restoration to an isolated database on the normal backup schedule. After import, confirm the batch's master checksum, entry counts, links for matched farmers, and that an ordinary Operations account cannot retrieve PDF bytes. The archive increases database and backup size; monitor Neon's free-plan storage before adding further batches.
+
+## Batch 2 paper-form import
+
+`app/scripts/import-batch-registrations.mjs` imports a privately reviewed 24-page, 12-form manifest for `BATCH-002`. It promotes confirmed unregistered directory entries without changing their UUIDs, assigns new Farmer IDs through the existing sequence, creates only independently matched new farmers, saves source transcriptions, and archives the unmodified master with protected two-page extracts in one transaction. A form marked `hold` stays unregistered and its extract is hidden from Operations until an administrator reviews the association. Unmarked consent and verification boxes remain unknown. The script checks the PDF checksum, page pairing, identifier collisions, and current farmer snapshots before writing.
+
+Keep the PDF, manifest, and reconciliation report under ignored `data/private/`. With a separately supplied owner connection, run the dry run first; `apply` is idempotent for a complete batch:
+
+```bash
+node app/scripts/import-batch-registrations.mjs /absolute/private/path/batch2-manifest.json
+node app/scripts/import-batch-registrations.mjs /absolute/private/path/batch2-manifest.json apply
+```
+
+The supplier PDF category and gender reconciliation is separate: `app/scripts/import-supplier-attributes.mjs` accepts a reviewed private row-to-farmer plan and the original PDF. It updates only strong matches, preserves uncertain rows for review, and leaves birth date and language blank when the source leaves them blank. Neither script adds confidential source files to Git.
