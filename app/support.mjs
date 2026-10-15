@@ -51,7 +51,7 @@ export async function updateTicket(db,id,input){
  await db.query("INSERT INTO support_ticket_events(ticket_id,action,previous_status,new_status,note,actor,source_portal) VALUES($1,'Status update',$2,$3,$4,'admin','Admin')",[id,old.status,status,note]);
  return ticket;
 }
-export function mailConfigured(env=process.env){return Boolean(env.CONTACT_SUPPORT_EMAIL&&env.SUPPORT_SMTP_HOST&&['465','587'].includes(String(env.SUPPORT_SMTP_PORT))&&env.SUPPORT_SMTP_USER&&env.SUPPORT_SMTP_PASSWORD&&env.SUPPORT_EMAIL_FROM);}
+export function mailConfigured(env=process.env){return Boolean(env.CONTACT_SUPPORT_EMAIL&&env.SUPPORT_EMAIL_FROM&&(env.SUPPORT_RESEND_API_KEY||(env.SUPPORT_SMTP_HOST&&['465','587'].includes(String(env.SUPPORT_SMTP_PORT))&&env.SUPPORT_SMTP_USER&&env.SUPPORT_SMTP_PASSWORD)));}
 export function emailSafeDescription(value){return String(value).replace(/^.*(?:KRA|M-?Pesa|national ID|identity document|passport|signature|consent|payment|\bPIN\b).*$/gim,'[SENSITIVE DETAIL REDACTED]').replace(/\b\d{7,12}\b/g,'[NUMBER REDACTED]');}
 export async function deliverTicket(db,id,env=process.env,sendMail,force=false){
  if(!mailConfigured(env)){const {rows:[existing]}=await db.query('SELECT notification_status FROM support_tickets WHERE id=$1',[id]);if(!existing)throw new Problem(404,'Ticket not found.');return {notification_status:existing.notification_status};}
@@ -59,9 +59,15 @@ export async function deliverTicket(db,id,env=process.env,sendMail,force=false){
  WHERE id=$1 AND notification_status<>'sent' AND (notification_next_attempt_at IS NULL OR notification_next_attempt_at<=now() OR $2::boolean) AND (notification_claimed_at IS NULL OR notification_claimed_at<now()-interval '5 minutes') RETURNING *`,[id,force]);
  if(!ticket){const {rows:[existing]}=await db.query('SELECT notification_status FROM support_tickets WHERE id=$1',[id]);if(!existing)throw new Problem(404,'Ticket not found.');return {notification_status:existing.notification_status};}
  const lines=['Satima Farmhouse CMS Support',`Ticket: ${ticket.ticket_reference}`,`Category: ${ticket.category}`,`Subject: ${emailSafeDescription(ticket.subject)}`,`Priority: ${ticket.priority}`,`Requester: ${ticket.requester_name}`,`Contact: ${[ticket.contact_email,ticket.contact_phone].filter(Boolean).join(' / ')}`,`Submitted: ${new Intl.DateTimeFormat('en-KE',{timeZone:'Africa/Nairobi',dateStyle:'medium',timeStyle:'short'}).format(ticket.submitted_at)}`,`Source: ${ticket.source_portal}`,`Related record: ${ticket.related_reference||'None'}`,'',emailSafeDescription(ticket.description)];
- try{const transport=sendMail?null:nodemailer.createTransport({host:env.SUPPORT_SMTP_HOST,port:Number(env.SUPPORT_SMTP_PORT),secure:Number(env.SUPPORT_SMTP_PORT)===465,requireTLS:Number(env.SUPPORT_SMTP_PORT)!==465,auth:{user:env.SUPPORT_SMTP_USER,pass:env.SUPPORT_SMTP_PASSWORD}});
-  const sender=sendMail||((message)=>transport.sendMail(message));
-  await sender({to:env.CONTACT_SUPPORT_EMAIL,from:env.SUPPORT_EMAIL_FROM,subject:`Satima CMS Support | ${ticket.ticket_reference} | ${ticket.category}`,text:lines.join('\n'),messageId:`<${ticket.id}@satima-cms-support>`});
+ try{const message={to:env.CONTACT_SUPPORT_EMAIL,from:env.SUPPORT_EMAIL_FROM,subject:`Satima CMS Support | ${ticket.ticket_reference} | ${ticket.category}`,text:lines.join('\n'),messageId:`<${ticket.id}@satima-cms-support>`};
+  if(sendMail)await sendMail(message);
+  else if(env.SUPPORT_RESEND_API_KEY){
+   const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${env.SUPPORT_RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':ticket.id},body:JSON.stringify({from:message.from,to:[message.to],subject:message.subject,text:message.text}),signal:AbortSignal.timeout(15000)});
+   if(!response.ok)throw new Error('Support notification was not accepted');
+  }else{
+   const transport=nodemailer.createTransport({host:env.SUPPORT_SMTP_HOST,port:Number(env.SUPPORT_SMTP_PORT),secure:Number(env.SUPPORT_SMTP_PORT)===465,requireTLS:Number(env.SUPPORT_SMTP_PORT)!==465,auth:{user:env.SUPPORT_SMTP_USER,pass:env.SUPPORT_SMTP_PASSWORD}});
+   await transport.sendMail(message);
+  }
   await db.query("UPDATE support_tickets SET notification_status='sent',notification_sent_at=now(),notification_claimed_at=NULL,notification_next_attempt_at=NULL WHERE id=$1",[id]);return {notification_status:'sent'};
  }catch{await db.query("UPDATE support_tickets SET notification_status='failed',notification_claimed_at=NULL,notification_next_attempt_at=now()+interval '15 minutes' WHERE id=$1",[id]);return {notification_status:'failed'};}
 }
