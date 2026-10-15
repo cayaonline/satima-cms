@@ -3,6 +3,8 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&
 const categoryRoutes={'Satima Farmers':'/operations/category/satima','Larger Sagana Farmers':'/operations/category/larger-sagana','Kangema Farmers':'/operations/category/kangema','Others':'/operations/category/others'};
 const routeCategory=Object.entries(categoryRoutes).find(([,path])=>path===location.pathname)?.[0]||null;
 const flaggedRoute=location.pathname==='/operations/flagged-records';
+const statusPages={all:{title:'All Farmers',registration:'',description:'All farmers in the directory.'},registered:{title:'Registered Farmers',registration:'registered',description:'Farmers with completed registration.'},'not-registered':{title:'Not Registered Farmers',registration:'not_registered',description:'Farmers whose registration is not complete, including records requiring review.'}};
+const statusRoute=statusPages[location.pathname.match(/^\/operations\/farmers\/(all|registered|not-registered)$/)?.[1]]||null;
 const stakeholderPages={
  '/operations/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
  '/operations/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
@@ -26,6 +28,12 @@ if(flaggedRoute){
  $('#page-title').textContent='Flagged Records';$('#breadcrumb').textContent='Flagged Records';
  $('#page-subtitle').textContent='Supplier-list entries awaiting identity review.';
  $('#stats').hidden=true;$('#directory-filters').hidden=true;
+}
+if(statusRoute){
+ $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
+ $('#page-title').textContent=statusRoute.title;$('#breadcrumb').textContent=statusRoute.title;
+ $('#page-subtitle').textContent=statusRoute.description;$('#category-total').hidden=false;
+ $('#stats').hidden=true;$('#registration').closest('label').hidden=true;
 }
 if(kraRoute){$('#farmer-content').hidden=true;$('#kra-content').hidden=false;$('#breadcrumb').textContent=kraRoute.title;if(kraRoute.filtered){$('#kra-stats').hidden=true;$('#kra-back').href=kraBase;$('#kra-back').textContent='← Back to KRA Verification';$('#kra-page-label').textContent='KRA VERIFICATION';$('#kra-page-title').textContent=kraRoute.title;$('#kra-page-subtitle').textContent='Farmers in this KRA verification group.';$('#kra-category-total').hidden=false;}}
 if(stakeholderRoute){
@@ -76,11 +84,12 @@ async function load(){
  const ticket=++requestNumber,[sort,direction]=$('#sort').value.split(':');
  try{
   if(flaggedRoute){const flags=await api('/flagged-records');if(ticket!==requestNumber)return;const q=$('#search').value.trim().toLowerCase(),rows=flags.records.filter(r=>!q||[r.row_number,r.source_name,r.source_category,...r.candidates.flatMap(c=>[c.customer_id,c.full_name])].some(v=>String(v||'').toLowerCase().includes(q)));$('#directory').innerHTML=rows.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Flagged supplier records"><table class="flagged-table"><thead><tr><th>Supplier row</th><th>Supplier name</th><th>Supplier category</th><th>Possible CMS matches</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.row_number)}</td><td>${esc(r.source_name)}</td><td>${esc(r.source_category)}</td><td>${r.candidates.map(c=>`<button class="link-button flagged-candidate" data-view="${esc(c.id)}">${esc(c.customer_id||'—')} · ${esc(c.full_name)}</button>`).join('')||'—'}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${rows.length} flagged ${rows.length===1?'record':'records'} shown</div>`:'<div class="empty"><h3>No flagged records found</h3></div>';return;}
-  const [data,flags]=await Promise.all([api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:$('#registration').value,gender:$('#gender').value,sort,direction,page})),api('/flagged-records')]);
+  const [data,flags]=await Promise.all([api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:statusRoute?statusRoute.registration:$('#registration').value,gender:$('#gender').value,sort,direction,page})),api('/flagged-records')]);
   if(ticket!==requestNumber)return;
   if(page>1&&page>data.pagination.total_pages){page=Math.max(1,data.pagination.total_pages);return load();}
   if(routeCategory)$('#category-total').textContent=data.stats.total+' '+(data.stats.total===1?'farmer':'farmers')+' in '+routeCategory+'.';
-  $('#stats').innerHTML=[['Total farmers',data.stats.total],['Registered',data.stats.registered],['Not registered',data.stats.not_registered]].map(([label,count])=>`<div class="stat"><span class="stat-top">${esc(label)}</span><strong>${esc(count)}</strong></div>`).join('');
+  if(statusRoute)$('#category-total').textContent=data.stats.total+' '+(data.stats.total===1?'farmer':'farmers')+' in this selection.';
+  $('#stats').innerHTML=[['Total farmers',data.stats.total,'/operations/farmers/all'],['Registered',data.stats.registered,'/operations/farmers/registered'],['Not registered',data.stats.not_registered,'/operations/farmers/not-registered']].map(([label,count,url])=>`<a class="stat stat-link" href="${url}" aria-label="View ${esc(count)} ${esc(label.toLowerCase())}"><span class="stat-top">${esc(label)}</span><strong>${esc(count)}</strong><span class="card-action">View Farmers →</span></a>`).join('');
   if(!routeCategory)$('#stats').insertAdjacentHTML('beforeend',`<a class="stat stat-flagged stat-link" href="/operations/flagged-records" aria-label="View ${esc(flags.total)} flagged records"><span class="stat-top">Flagged Records</span><strong>${esc(flags.total)}</strong><span class="flagged-link card-action">View Flagged Records →</span></a>`);
   if(!routeCategory)$('#category-summary').innerHTML=Object.entries(categoryRoutes).map(([name,path])=>`<a class="supplier-category" href="${path}" aria-label="View ${esc(name)} farmers"><span class="category-name">${esc(name)}</span><span class="category-arrow" aria-hidden="true">↗</span><strong>${esc(data.stats.categories[name]||0)}</strong><span class="card-action">View Farmers →</span></a>`).join('');
   const rows=data.farmers;
@@ -109,7 +118,7 @@ document.addEventListener('click',event=>{const button=event.target.closest('[da
 $('#detail-dialog').addEventListener('click',event=>{if(event.target===$('#detail-dialog'))$('#detail-dialog').close();});
 $('#search').addEventListener('input',()=>{clearTimeout(debounce);page=1;debounce=setTimeout(load,200);});
 for(const id of ['category','registration','gender','sort'])$('#'+id).addEventListener('change',()=>{page=1;load();});
-$('#clear-filters').addEventListener('click',()=>{for(const [id,value] of [['category',routeCategory||''],['registration',''],['gender',''],['sort','customer_id:asc'],['search','']])$('#'+id).value=value;page=1;load();});
+$('#clear-filters').addEventListener('click',()=>{for(const [id,value] of [['category',routeCategory||''],['registration',statusRoute?.registration||''],['gender',''],['sort','customer_id:asc'],['search','']])$('#'+id).value=value;page=1;load();});
 document.addEventListener('visibilitychange',()=>{if(!stakeholderRoute&&!milkRoute&&!kraRoute&&!document.hidden&&!$('#workspace').hidden)load();});
 document.addEventListener('pointerdown',event=>{const filters=$('#directory-filters');if(filters.open&&!filters.contains(event.target))filters.open=false;});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#directory-filters').open){$('#directory-filters').open=false;$('#directory-filters summary').focus();}});

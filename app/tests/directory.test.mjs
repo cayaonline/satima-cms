@@ -73,6 +73,11 @@ test('category and registration filters combine; an unregistered profile gets on
   await createFarmer(c,{full_name:'ISOLATED PHONE OWNER',primary_phone:'0712345678',registered_by:'TEST'});
   const unassigned=await listFarmers(c,params({category:'unassigned',registration:'registered',q:'ISOLATED PHONE OWNER'}));assert.equal(unassigned.stats.total,1);assert.equal(unassigned.farmers[0].category,null);
   const {rows:[uncertain]}=await c.query("INSERT INTO farmers(customer_id,full_name,registration_date,registration_status,category) VALUES(NULL,'ISOLATED UNCERTAIN',NULL,'review_required','Others') RETURNING id,updated_at::text AS revision");
+  const summary=await listFarmers(c,params({q:'ISOLATED',scope:'registered'}));
+  const incomplete=await listFarmers(c,params({q:'ISOLATED',scope:'registered',registration:'incomplete'}));
+  assert.equal(incomplete.stats.total,summary.stats.not_registered);
+  assert(incomplete.farmers.some(f=>f.id===uncertain.id));
+  assert(incomplete.farmers.every(f=>f.registration_status!=='registered'));
   const {rows:[issue]}=await c.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'registration_match','ISOLATED IDENTITY REVIEW') RETURNING id",[uncertain.id]);
   const completion={full_name:'ISOLATED UNCERTAIN',primary_phone:'0712345678',registered_by:'TEST',registration_date:'2026-10-10',registration_status:'registered',category:'Others',revision:uncertain.revision};
   await assert.rejects(()=>updateFarmer(c,uncertain.id,completion),e=>e.status===409&&e.message.includes('identity review'));
