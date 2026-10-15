@@ -9,7 +9,7 @@ const stakeholderPages={
  '/operations/customers':{name:'Customers',label:'CUSTOMER MANAGEMENT',title:'Customer Directory',description:'Manage and organize Morning Dew customer records.',empty:'No customers registered yet',emptyDescription:'Customer records will appear here once they are added to the system.'},
  '/operations/distributors':{name:'Distributors',label:'DISTRIBUTION NETWORK',title:'Distributor Directory',description:'Manage and organize Morning Dew distribution partners.',empty:'No distributors registered yet',emptyDescription:'Distributor records will appear here once they are added to the system.'}
 };
-const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:null);
+const stakeholderRoute=stakeholderPages[location.pathname]||(/^\/operations\/customers\/(category\/|awaiting-categorisation$)/.test(location.pathname)?stakeholderPages['/operations/customers']:(/^\/operations\/distributors\/(type\/|[a-f0-9-]{36}$)/i.test(location.pathname)?stakeholderPages['/operations/distributors']:null));
 const milkRoute=window.milkUI.route(location.pathname,'/operations/milk-collection');
 const milkOperationRoute=window.milkOperations.route(location.pathname,'/operations');
 const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
@@ -52,7 +52,7 @@ async function api(path,options={}){
  return data;
 }
 function showLogin(){if(location.pathname!=='/operations/login'){location.replace('/operations/login');return;}$('#login').hidden=false;$('#workspace').hidden=true;}
-async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkOperationRoute)window.milkOperations.mount(api,true,milkOperationRoute);else if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
+async function start(){try{const session=await api('/session');sensitiveRegistration=session.sensitive_registration===true;if(location.pathname==='/operations/login'){location.replace('/operations');return;}$('#login').hidden=true;$('#workspace').hidden=false;if(milkOperationRoute)window.milkOperations.mount(api,true,milkOperationRoute);else if(milkRoute)window.initMilkCollection(api,true,milkRoute);else if(kraRoute)await loadKra();else if(stakeholderRoute?.name==='Customers')window.initCustomerDirectory(api);else if(stakeholderRoute?.name==='Distributors')window.initDistributorDirectory(api);else if(!stakeholderRoute)await load();}catch{showLogin();}}
 setupLogin(async credentials=>{await api('/login',{method:'POST',body:JSON.stringify(credentials)});location.assign('/operations');});
 $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:'POST',body:'{}'});location.replace('/operations/login');}catch(error){$('#toast').textContent=error.message;$('#toast').hidden=false;}});
 

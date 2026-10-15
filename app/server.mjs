@@ -4,8 +4,9 @@ import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
 import {listFlaggedSuppliers} from './flagged-suppliers.mjs';
 import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.mjs';
+import {listDistributors,distributorDetail,updateDistributor,distributorAudit} from './distributors.mjs';
 import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
-import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,operationAudit} from './milk-operations.mjs';
+import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -25,7 +26,7 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 for(const status of ['all','registered','not-registered']){directoryPages.add('/farmers/'+status);operationsPages.add('/operations/farmers/'+status);}
@@ -47,6 +48,7 @@ for(const slug of Object.keys(customerCategoryRoutes)){
  directoryPages.add('/customers/category/'+slug);
  operationsPages.add('/operations/customers/category/'+slug);
 }
+for(const slug of ['distributor','store']){directoryPages.add('/distributors/type/'+slug);operationsPages.add('/operations/distributors/type/'+slug);}
 directoryPages.add('/customers/awaiting-categorisation');
 operationsPages.add('/operations/customers/awaiting-categorisation');
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -93,6 +95,8 @@ async function operationalRoutes(req,res,path,url,base,actor,portal){
  if(record&&req.method==='PATCH'){const input=await body(req);return send(res,200,await transaction(c=>updateDistribution(c,record[1],input,actor,portal),actor)),true;}
  const history=path.match(new RegExp('^'+prefix+'/customers/([a-f0-9-]+)/milk-distributions$','i'));
  if(history&&req.method==='GET')return send(res,200,await customerDistributionHistory(pool,history[1])),true;
+ const distributorHistory=path.match(new RegExp('^'+prefix+'/distributors/([a-f0-9-]+)/milk-distributions$','i'));
+ if(distributorHistory&&req.method==='GET')return send(res,200,await distributorDistributionHistory(pool,distributorHistory[1])),true;
  const audit=path.match(new RegExp('^'+prefix+'/milk-operation-audit/(quality|distribution)/([a-f0-9-]+)$','i'));
  if(audit&&req.method==='GET')return send(res,200,await operationAudit(pool,audit[1],audit[2])),true;
  return false;
@@ -118,7 +122,8 @@ const server=http.createServer(async(req,res)=>{
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
  const operationalDetail=/^\/(?:operations\/)?(?:milk-processing\/(?:batch|collection)|milk-distribution\/record)\/[a-f0-9-]{36}$/i.test(path);
- const asset=files[path]||((directoryPages.has(path)||operationalDetail&&!path.startsWith('/operations/'))?files['/']:null)||((operationsPages.has(path)||operationalDetail&&path.startsWith('/operations/'))?['operations.html','text/html']:null);
+ const distributorPage=/^\/(?:operations\/)?distributors\/[a-f0-9-]{36}$/i.test(path);
+ const asset=files[path]||((directoryPages.has(path)||(operationalDetail||distributorPage)&&!path.startsWith('/operations/'))?files['/']:null)||((operationsPages.has(path)||(operationalDetail||distributorPage)&&path.startsWith('/operations/'))?['operations.html','text/html']:null);
  if(asset&&req.method==='GET'){const [f,mime]=asset;res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/operations/login'&&req.method==='POST'){
   if(!viewerEnabled&&!registrationViewerEnabled)throw new Problem(503,'Operations access is not configured.');
@@ -159,6 +164,9 @@ const server=http.createServer(async(req,res)=>{
   if(await operationalRoutes(req,res,path,url,'/api/operations/milk-processing',viewer.role==='registration_viewer'?registrationViewerUsername:viewerUsername,'Operations'))return;
   if(path==='/api/operations/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
   if(path==='/api/operations/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
+  if(path==='/api/operations/distributors'&&req.method==='GET')return send(res,200,await listDistributors(pool,url.searchParams));
+  const viewerDistributor=path.match(/^\/api\/operations\/distributors\/([^/]+)$/);
+  if(viewerDistributor&&req.method==='GET')return send(res,200,await distributorDetail(pool,viewerDistributor[1]));
   const viewerCustomer=path.match(/^\/api\/operations\/customers\/([^/]+)$/);
   if(viewerCustomer&&req.method==='GET'){if(!uuid.test(viewerCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,viewerCustomer[1]));}
   if(path==='/api/operations/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
@@ -203,6 +211,14 @@ const server=http.createServer(async(req,res)=>{
  if(archiveEntry&&req.method==='PATCH')return send(res,200,await saveArchiveEntry(archiveEntry[1],await body(req),archiveEntry[2]));
  if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
  if(path==='/api/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
+ if(path==='/api/distributors'&&req.method==='GET')return send(res,200,await listDistributors(pool,url.searchParams));
+ const adminDistributorAudit=path.match(/^\/api\/distributors\/([^/]+)\/audit$/);
+ if(adminDistributorAudit&&req.method==='GET')return send(res,200,await distributorAudit(pool,adminDistributorAudit[1]));
+ const adminDistributor=path.match(/^\/api\/distributors\/([^/]+)$/);
+ if(adminDistributor){
+  if(req.method==='GET')return send(res,200,await distributorDetail(pool,adminDistributor[1]));
+  if(req.method==='PATCH'){const input=await body(req);return send(res,200,await transaction(c=>updateDistributor(c,adminDistributor[1],input,'admin')));}
+ }
  const adminCustomer=path.match(/^\/api\/customers\/([^/]+)$/);
  if(adminCustomer&&req.method==='GET'){if(!uuid.test(adminCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,adminCustomer[1]));}
  if(path==='/api/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
