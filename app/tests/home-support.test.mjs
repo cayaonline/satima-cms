@@ -4,6 +4,7 @@ import {reportingPeriod} from '../home.mjs';
 import {validateTicket,categories,emailSafeDescription,deliverTicket,mailConfigured} from '../support.mjs';
 const id='12345678-1234-4234-8234-123456789abc';
 test('Kenya reporting periods and custom date validation',()=>{
+ assert.deepEqual(reportingPeriod(new URLSearchParams(),'2026-10-16'),{period:'custom',from:'2026-09-01',to:'2026-09-30'});
  assert.deepEqual(reportingPeriod(new URLSearchParams('period=today'),'2026-10-16'),{period:'today',from:'2026-10-16',to:'2026-10-16'});
  assert.deepEqual(reportingPeriod(new URLSearchParams('period=week'),'2026-10-16'),{period:'week',from:'2026-10-12',to:'2026-10-16'});
  assert.deepEqual(reportingPeriod(new URLSearchParams('period=month'),'2026-10-16'),{period:'month',from:'2026-10-01',to:'2026-10-16'});
