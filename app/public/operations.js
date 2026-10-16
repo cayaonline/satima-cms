@@ -3,7 +3,6 @@ const overviewRoute=location.pathname==='/operations',supportRoute=location.path
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const categoryRoutes={'Satima Farmers':'/operations/category/satima','Larger Sagana Farmers':'/operations/category/larger-sagana','Kangema Farmers':'/operations/category/kangema','Others':'/operations/category/others'};
 const routeCategory=Object.entries(categoryRoutes).find(([,path])=>path===location.pathname)?.[0]||null;
-const flaggedRoute=location.pathname==='/operations/flagged-records';
 const statusPages={all:{title:'All Farmers',registration:'',description:'All farmers in the directory.'},registered:{title:'Registered Farmers',registration:'registered',description:'Farmers with completed registration.'},'not-registered':{title:'Not Registered Farmers',registration:'not_registered',description:'Farmers whose registration is not complete, including records requiring review.'}};
 const statusRoute=statusPages[location.pathname.match(/^\/operations\/farmers\/(all|registered|not-registered)$/)?.[1]]||null;
 const stakeholderPages={
@@ -25,12 +24,6 @@ if(routeCategory){
  $('#page-title').textContent=routeCategory;$('#breadcrumb').textContent=routeCategory;
  $('#page-subtitle').textContent='Farmers in this supplier category.';
  $('#category-total').hidden=false;$('#category').value=routeCategory;$('#category').closest('label').hidden=true;
-}
-if(flaggedRoute){
- $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
- $('#page-title').textContent='Flagged Records';$('#breadcrumb').textContent='Flagged Records';
- $('#page-subtitle').textContent='Supplier-list entries awaiting identity review.';
- $('#stats').hidden=true;$('#directory-filters').hidden=true;
 }
 if(statusRoute){
  $('#back-directory').hidden=false;$('#supplier-section').hidden=true;
@@ -62,7 +55,7 @@ $('#logout').addEventListener('click',async()=>{try{await api('/logout',{method:
 function genderLabel(value){return {male:'Male',female:'Female',not_verified:'Not verified'}[value]||'Not verified';}
 const birthDate=value=>value?date(value):'';
 function registrationLabel(value){return value==='registered'?'Registered':'Not registered';}
-function date(value){return value?new Date(value+'T12:00:00+03:00').toLocaleDateString('en-GB',{timeZone:'Africa/Nairobi'}):'Not recorded';}
+function date(value){return value?window.satimaDates.format(value):'Not recorded';}
 function field(label,value){return `<div class="kv"><dt>${esc(label)}</dt><dd>${esc(value||'Not recorded')}</dd></div>`;}
 function sensitiveField(label,value){return `<div class="kv"><dt>${esc(label)}</dt><dd>${esc(value===null||value===undefined||value===''?'Not Recorded':value)}</dd></div>`;}
 function recordedBoolean(value){return value===true?'Yes':value===false?'No':'Not Recorded';}
@@ -86,14 +79,12 @@ function photoCard(farmer){return `<section class="card profile-photo"><h3>Farme
 async function load(){
  const ticket=++requestNumber,[sort,direction]=$('#sort').value.split(':');
  try{
-  if(flaggedRoute){const flags=await api('/flagged-records');if(ticket!==requestNumber)return;const q=$('#search').value.trim().toLowerCase(),rows=flags.records.filter(r=>!q||[r.row_number,r.source_name,r.source_category,...r.candidates.flatMap(c=>[c.customer_id,c.full_name])].some(v=>String(v||'').toLowerCase().includes(q)));$('#directory').innerHTML=rows.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Flagged supplier records"><table class="flagged-table"><thead><tr><th>Supplier row</th><th>Supplier name</th><th>Supplier category</th><th>Possible CMS matches</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.row_number)}</td><td>${esc(r.source_name)}</td><td>${esc(r.source_category)}</td><td>${r.candidates.map(c=>`<button class="link-button flagged-candidate" data-view="${esc(c.id)}">${esc(c.customer_id||'—')} · ${esc(c.full_name)}</button>`).join('')||'—'}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${rows.length} flagged ${rows.length===1?'record':'records'} shown</div>`:'<div class="empty"><h3>No flagged records found</h3></div>';return;}
-  const [data,flags]=await Promise.all([api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:statusRoute?statusRoute.registration:$('#registration').value,gender:$('#gender').value,sort,direction,page})),api('/flagged-records')]);
+  const data=await api('/farmers?'+new URLSearchParams({q:$('#search').value,category:routeCategory||$('#category').value,registration:statusRoute?statusRoute.registration:$('#registration').value,gender:$('#gender').value,sort,direction,page}));
   if(ticket!==requestNumber)return;
   if(page>1&&page>data.pagination.total_pages){page=Math.max(1,data.pagination.total_pages);return load();}
   if(routeCategory)$('#category-total').textContent=data.stats.total+' '+(data.stats.total===1?'farmer':'farmers')+' in '+routeCategory+'.';
   if(statusRoute)$('#category-total').textContent=data.stats.total+' '+(data.stats.total===1?'farmer':'farmers')+' in this selection.';
   $('#stats').innerHTML=[['Total farmers',data.stats.total,'/operations/farmers/all'],['Registered',data.stats.registered,'/operations/farmers/registered'],['Not registered',data.stats.not_registered,'/operations/farmers/not-registered']].map(([label,count,url])=>`<a class="stat stat-link" href="${url}" aria-label="View ${esc(count)} ${esc(label.toLowerCase())}"><span class="stat-top">${esc(label)}</span><strong>${esc(count)}</strong><span class="card-action">View Farmers →</span></a>`).join('');
-  if(!routeCategory)$('#stats').insertAdjacentHTML('beforeend',`<a class="stat stat-flagged stat-link" href="/operations/flagged-records" aria-label="View ${esc(flags.total)} flagged records"><span class="stat-top">Flagged Records</span><strong>${esc(flags.total)}</strong><span class="flagged-link card-action">View Flagged Records →</span></a>`);
   if(!routeCategory)$('#category-summary').innerHTML=Object.entries(categoryRoutes).map(([name,path])=>`<a class="supplier-category" href="${path}" aria-label="View ${esc(name)} farmers"><span class="category-name">${esc(name)}</span><span class="category-arrow" aria-hidden="true">↗</span><strong>${esc(data.stats.categories[name]||0)}</strong><span class="card-action">View Farmers →</span></a>`).join('');
   const rows=data.farmers;
   $('#directory').innerHTML=rows.length?`<div class="table-wrap" tabindex="0" role="region" aria-label="Farmer directory table; scroll to view all columns and rows"><table><thead><tr><th>View</th><th>Farmer ID</th><th>Farmer Name</th><th>Supplier Category</th><th>Phone</th><th>Gender</th><th>Date of Birth</th><th>Preferred Language</th><th>Registration Status</th><th>Location</th><th>KRA PIN</th></tr></thead><tbody>${rows.map(farmer=>`<tr><td><button class="link-button" data-view="${esc(farmer.id)}" aria-label="View ${esc(farmer.full_name)}">View →</button></td><td class="farmer-id">${esc(farmer.customer_id||'—')}</td><td><div class="farmer-cell"><button data-view="${esc(farmer.id)}">${esc(farmer.full_name)}</button></div></td><td>${esc(farmer.category||'Not assigned')}</td><td>${esc(farmer.primary_phone||'Not recorded')}</td><td>${esc(genderLabel(farmer.gender))}</td><td>${esc(birthDate(farmer.date_of_birth))}</td><td>${esc(farmer.preferred_language||'')}</td><td><span class="badge">${esc(registrationLabel(farmer.registration_status))}</span></td><td>${esc(farmer.village_area||farmer.location||'Not recorded')}<br><small class="muted">${esc(farmer.county||'')}</small></td><td>${esc(farmer.kra_pin||'—')}</td></tr>`).join('')}</tbody></table></div><div class="table-foot">${rows.length} shown${data.pagination.total_pages>1?` · Page ${page} of ${data.pagination.total_pages}<span class="page-actions"><button class="link-button" data-page="${page-1}" ${page===1?'disabled':''}>Previous</button><button class="link-button" data-page="${page+1}" ${page>=data.pagination.total_pages?'disabled':''}>Next</button></span>`:''}</div>`:'<div class="empty"><h3>No farmers found</h3><p>Try another search or filter.</p></div>';
@@ -137,7 +128,7 @@ async function loadKra(){if(!kraRoute)return;const request=++kraRequest;try{cons
  }catch(error){if(request===kraRequest)$('#kra-table').innerHTML=`<p class="error">${esc(error.message)}</p>`;}}
 async function openKra(id){try{kraCurrent=await api('/kra-verification/'+id);const f=kraCurrent.farmer;$('#kra-dialog-title').textContent=(f.customer_id||'Farmer')+' · '+f.full_name;$('#kra-record').innerHTML=`<div class="card"><dl>${field('Recorded KRA PIN',f.kra_pin||'—')}${field('Format',kraLabel[kraCurrent.format])}</dl></div>`;
  $('#kra-history').innerHTML=`<h3>Verification history</h3>${kraCurrent.history.length?kraCurrent.history.map(h=>`<div class="card"><dl>${field('Outcome',kraLabel[h.outcome])}${field('Name match',kraLabel[h.name_match])}${field('Taxpayer name',h.taxpayer_name)}${field('PIN status',h.pin_status)}${field('Checked on',date(h.checked_at))}${field('Checked by',h.checked_by)}${field('Source portal',h.source_portal)}${field('Recorded by account',h.actor)}${field('Remarks',h.remarks)}${field('Method',h.method==='manual_review'?'Manual review':'Manual KRA checker')}</dl></div>`).join(''):'<p class="muted">No official KRA check recorded.</p>'}`;
- $('#kra-form').reset();for(const option of $('#kra-form [name="outcome"]').options)option.disabled=kraCurrent.format!=='valid'&&option.value!==''&&option.value!=='needs_review';if(kraCurrent.format!=='valid')$('#kra-form [name="outcome"]').value='needs_review';$('#kra-form [name="checked_at"]').value=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Nairobi'});window.kraUI.restorePinStatus($('#kra-form'),kraCurrent);$('#kra-form-error').textContent='';$('#kra-dialog').showModal();
+ $('#kra-form').reset();for(const option of $('#kra-form [name="outcome"]').options)option.disabled=kraCurrent.format!=='valid'&&option.value!==''&&option.value!=='needs_review';if(kraCurrent.format!=='valid')$('#kra-form [name="outcome"]').value='needs_review';$('#kra-form [name="checked_at"]').value=window.satimaDates.today();window.kraUI.restorePinStatus($('#kra-form'),kraCurrent);$('#kra-form-error').textContent='';$('#kra-dialog').showModal();
  }catch(error){showToast(error.message);}}
 $('#kra-search').addEventListener('input',()=>{clearTimeout(kraDebounce);kraPage=1;kraDebounce=setTimeout(loadKra,200);});
 document.addEventListener('click',event=>{const review=event.target.closest('[data-kra-review]'),paging=event.target.closest('[data-kra-page]');if(review)openKra(review.dataset.kraReview);if(paging&&!paging.disabled){kraPage=Number(paging.dataset.kraPage);loadKra();}});

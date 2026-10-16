@@ -61,7 +61,16 @@ export async function listMilkCollections(pool,params){
  return {records:rows,pagination:{page,page_size:size,total:totals.total,total_pages:Math.max(1,Math.ceil(totals.total/size))},total_liters:totals.total_liters,unique_farmers:totals.unique_farmers};
 }
 
-export async function milkSummary(pool){
+export async function milkSummary(pool,params=new URLSearchParams()){
+ if(params.has('from')||params.has('to')){
+  const {where,values}=filters(new URLSearchParams({from:params.get('from')||'',to:params.get('to')||''}));
+  const {rows:[totals]}=await pool.query(`SELECT count(*)::int AS period_records,count(DISTINCT m.farmer_id)::int AS unique_farmers,coalesce(sum(m.quantity_liters),0)::text AS period_liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where}`,values);
+  const {rows:daily}=await pool.query(`SELECT m.date_received::text AS label,sum(m.quantity_liters)::text AS liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY m.date_received ORDER BY m.date_received`,values);
+  const {rows:weekly}=await pool.query(`SELECT date_trunc('week',m.date_received)::date::text AS label,sum(m.quantity_liters)::text AS liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
+  const {rows:monthly}=await pool.query(`SELECT date_trunc('month',m.date_received)::date::text AS label,sum(m.quantity_liters)::text AS liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
+  const {rows:categories}=await pool.query(`SELECT coalesce(m.supplier_category_at_collection,'Awaiting Categorisation') AS category,coalesce(sum(m.quantity_liters),0)::text AS liters,count(*)::int AS deliveries FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
+  return {totals,daily,weekly,monthly,categories};
+ }
  const {rows:[totals]}=await pool.query(`SELECT coalesce(sum(quantity_liters) FILTER (WHERE date_received=(now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS today_liters,coalesce(sum(quantity_liters) FILTER (WHERE date_received>=date_trunc('week',now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS week_liters,coalesce(sum(quantity_liters) FILTER (WHERE date_received>=date_trunc('month',now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS month_liters,count(DISTINCT farmer_id) FILTER (WHERE date_received=(now() AT TIME ZONE 'Africa/Nairobi')::date)::int AS farmers_today FROM milk_collections`);
  const {rows:daily}=await pool.query(`SELECT day::date::text AS label,coalesce(sum(m.quantity_liters),0)::text AS liters FROM generate_series((now() AT TIME ZONE 'Africa/Nairobi')::date-29,(now() AT TIME ZONE 'Africa/Nairobi')::date,interval '1 day') AS days(day) LEFT JOIN milk_collections m ON m.date_received=day::date GROUP BY day ORDER BY day`);
  const {rows:weekly}=await pool.query(`SELECT start::date::text AS label,coalesce(sum(m.quantity_liters),0)::text AS liters FROM generate_series(date_trunc('week',now() AT TIME ZONE 'Africa/Nairobi')-interval '11 weeks',date_trunc('week',now() AT TIME ZONE 'Africa/Nairobi'),interval '1 week') AS weeks(start) LEFT JOIN milk_collections m ON m.date_received>=start::date AND m.date_received<(start+interval '1 week')::date GROUP BY start ORDER BY start`);

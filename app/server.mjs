@@ -2,7 +2,7 @@ import {PersistentSessionStore,LoginLimiter,validViewerHash,verifyViewerPassword
 import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
-import {listFlaggedSuppliers} from './flagged-suppliers.mjs';
+import {listFlaggedSuppliers,flaggedSupplierDetail,reviewFlaggedSupplier} from './flagged-suppliers.mjs';
 import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.mjs';
 import {listDistributors,distributorDetail,updateDistributor,distributorAudit} from './distributors.mjs';
 import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
@@ -30,11 +30,11 @@ if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
-const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/dates.js':['dates.js','text/javascript'],'/flagged-review.js':['flagged-review.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 files['/home-support.js']=['home-support.js','text/javascript'];
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 directoryPages.add('/farmers');directoryPages.add('/contact-support');
-const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/flagged-records','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
+const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
 operationsPages.add('/operations/farmers');operationsPages.add('/operations/contact-support');
 for(const status of ['all','registered','not-registered']){directoryPages.add('/farmers/'+status);operationsPages.add('/operations/farmers/'+status);}
 for(const page of ['/milk-processing','/milk-distribution']){directoryPages.add(page);operationsPages.add('/operations'+page);}
@@ -66,7 +66,7 @@ function send(res,status,data){res.writeHead(status,{'Content-Type':'application
 function sendPhotograph(res,photo){res.writeHead(200,{'Content-Type':photo.content_type,'Content-Length':photo.image_data.length,'X-Content-Type-Options':'nosniff'});res.end(photo.image_data);}
 async function milkRoutes(req,res,path,url,base,actor,portal){
  if(path===base+'/farmers'&&req.method==='GET'){send(res,200,await searchMilkFarmers(pool,url.searchParams.get('q')));return true;}
- if(path===base+'/summary'&&req.method==='GET'){send(res,200,await milkSummary(pool));return true;}
+ if(path===base+'/summary'&&req.method==='GET'){send(res,200,await milkSummary(pool,url.searchParams));return true;}
  if(path===base&&req.method==='GET'){send(res,200,await listMilkCollections(pool,url.searchParams));return true;}
  if(path===base&&req.method==='POST'){
   const input=milkSubmission(req.headers),photo=await photographBody(req);
@@ -147,7 +147,8 @@ const server=http.createServer(async(req,res)=>{
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
  const operationalDetail=/^\/(?:operations\/)?(?:milk-processing\/(?:batch|collection)|milk-distribution\/record)\/[a-f0-9-]{36}$/i.test(path);
  const distributorPage=/^\/(?:operations\/)?distributors\/[a-f0-9-]{36}$/i.test(path);
- const asset=files[path]||((directoryPages.has(path)||(operationalDetail||distributorPage)&&!path.startsWith('/operations/'))?files['/']:null)||((operationsPages.has(path)||(operationalDetail||distributorPage)&&path.startsWith('/operations/'))?['operations.html','text/html']:null);
+ const flaggedReviewPage=/^\/farmers\/flagged-records\/[a-f0-9-]{36}$/i.test(path);
+ const asset=files[path]||((directoryPages.has(path)||(operationalDetail||distributorPage||flaggedReviewPage)&&!path.startsWith('/operations/'))?files['/']:null)||((operationsPages.has(path)||(operationalDetail||distributorPage)&&path.startsWith('/operations/'))?['operations.html','text/html']:null);
  if(asset&&req.method==='GET'){const [f,mime]=asset;res.writeHead(200,{'Content-Type':mime});return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/api/operations/login'&&req.method==='POST'){
   if(!viewerEnabled&&!registrationViewerEnabled)throw new Problem(503,'Operations access is not configured.');
@@ -200,7 +201,6 @@ const server=http.createServer(async(req,res)=>{
   if(viewerDistributor&&req.method==='GET')return send(res,200,await distributorDetail(pool,viewerDistributor[1]));
   const viewerCustomer=path.match(/^\/api\/operations\/customers\/([^/]+)$/);
   if(viewerCustomer&&req.method==='GET'){if(!uuid.test(viewerCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,viewerCustomer[1]));}
-  if(path==='/api/operations/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
   const operationsKra=path.match(/^\/api\/operations\/kra-verification\/([^/]+)$/);
   if(operationsKra){if(!uuid.test(operationsKra[1]))throw new Problem(400,'Invalid farmer identifier.');
    if(req.method==='GET')return send(res,200,await kraHistory(pool,operationsKra[1]));
@@ -267,6 +267,9 @@ const server=http.createServer(async(req,res)=>{
  const adminCustomer=path.match(/^\/api\/customers\/([^/]+)$/);
  if(adminCustomer&&req.method==='GET'){if(!uuid.test(adminCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,adminCustomer[1]));}
  if(path==='/api/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
+ const flaggedReview=path.match(/^\/api\/flagged-records\/([a-f0-9-]{36})$/i);
+ if(flaggedReview){if(req.method==='GET')return send(res,200,await flaggedSupplierDetail(pool,flaggedReview[1]));
+  if(req.method==='POST'){const input=await body(req);return send(res,200,await transaction(c=>reviewFlaggedSupplier(c,flaggedReview[1],input,'Administrator'),'Administrator'));}}
  if(path==='/api/kra-verification'&&req.method==='GET')return send(res,200,await listKra(pool,url.searchParams));
  const kraRecord=path.match(/^\/api\/kra-verification\/([^/]+)$/);
  if(kraRecord){if(!uuid.test(kraRecord[1]))throw new Problem(400,'Invalid farmer identifier.');
