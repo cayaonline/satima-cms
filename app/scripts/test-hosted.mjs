@@ -42,7 +42,7 @@ try{
  for(const route of ['/farmers/all','/farmers/registered','/farmers/not-registered','/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers/category/current','/customers/category/lapsed','/customers/category/geographically-isolated','/customers/category/dormant','/customers/category/retired','/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
- for(const route of ['/operations','/operations/login','/operations/farmers/all','/operations/farmers/registered','/operations/farmers/not-registered','/operations/milk-collection','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/flagged-records','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
+ for(const route of ['/operations','/operations/login','/operations/farmers/all','/operations/farmers/registered','/operations/farmers/not-registered','/operations/milk-collection','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
 const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
  }
  for(const base of ['/farmers/kra-verification','/operations/kra-verification']){
@@ -313,6 +313,11 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   };
   const five=await newCollection(farmer.id,'5'),seven=await newCollection(secondFarmer.id,'7'),ten=await newCollection(farmer.id,'10'),eight=await newCollection(farmer.id,'8');
   const orderedCollections=await (await request('/api/milk-processing/collections?sort=id',{headers})).json();
+  const selectedCollections=await (await request('/api/milk-collections?'+new URLSearchParams({from:milkDay,to:milkDay}),{headers})).json();
+  const selectedSummary=await (await request('/api/milk-collections/summary?'+new URLSearchParams({from:milkDay,to:milkDay}),{headers})).json();
+  assert.equal(selectedSummary.totals.period_records,selectedCollections.pagination.total);
+  assert.equal(selectedSummary.totals.unique_farmers,selectedCollections.unique_farmers);
+  assert.equal(selectedSummary.categories.reduce((sum,category)=>sum+category.deliveries,0),selectedCollections.pagination.total);
   assert.deepEqual(orderedCollections.records.map(row=>row.collection_id),orderedCollections.records.map(row=>row.collection_id).sort());
   assert.equal((await request('/api/milk-processing/collections?sort=bad',{headers})).status,400);
   assert.equal((await request(processingBase+'/collections')).status,401);
@@ -385,6 +390,9 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await distribute(mixedBatch.id,11,'dispatched')).status,409,'Cannot dispatch more than produced');
   const distributionKey=randomUUID(),distributionResponse=await distribute(mixedBatch.id,5,'dispatched',distributionKey);
   assert.equal(distributionResponse.status,201);const dispatched=await distributionResponse.json();
+  const dispatchedOnly=await (await request(distributionBase+'/records?status=dispatched',{headers:viewerHeaders})).json();
+  assert.ok(dispatchedOnly.records.every(record=>record.status==='dispatched'));
+  assert.equal((await request(distributionBase+'/records?status=unknown',{headers:viewerHeaders})).status,400);
   assert.equal((await distribute(mixedBatch.id,5,'dispatched',distributionKey)).status,200);
   assert.equal((await (await request(processingBase+'/batches/'+mixedBatch.id,{headers})).json()).available_liters,'5.000000');
   const distributedKpi=await (await request('/api/milk-distribution/records?metric=distributed',{headers})).json();assert.equal(distributedKpi.pagination.total,1,'Draft records do not count as distributed');
@@ -525,18 +533,38 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
    const issue=await owner.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'master_supplier_match',$2) RETURNING id",[id,'Supplier master row '+row+': Confirm identity.']);ids.push(issue.rows[0].id);
   }
   const adminFlags=await (await request('/api/flagged-records',{headers})).json();
-  const opsFlags=await (await request('/api/operations/flagged-records',{headers:viewerHeaders})).json();
-  assert.equal(adminFlags.total,2);assert.deepEqual(opsFlags,adminFlags);
+  assert.equal((await request('/api/operations/flagged-records',{headers:viewerHeaders})).status,404);
+  assert.equal(adminFlags.total,2);
   assert.equal(adminFlags.records.find(r=>r.row_number===21).candidates.length,2,'Two possible farmers still count as one flagged source record');
   assert.equal((await request('/api/operations/flagged-records',{method:'POST',headers:viewerHeaders,body:'{}'})).status,403);
   await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[1]]);
   assert.equal((await (await request('/api/flagged-records',{headers})).json()).total,2);
   await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[2]]);
-  assert.equal((await (await request('/api/operations/flagged-records',{headers:viewerHeaders})).json()).total,1);
+  assert.equal((await (await request('/api/flagged-records',{headers})).json()).total,1);
   await owner.query("UPDATE farmer_data_issues SET status='resolved',resolution_note='Test review',resolved_at=now() WHERE id=$1",[ids[0]]);
   await owner.query('DELETE FROM farmer_data_issues WHERE farmer_id=$1',[another.id]);
   await owner.query('DELETE FROM farmer_audit_events WHERE farmer_id=$1',[another.id]);
   await owner.query('DELETE FROM farmers WHERE id=$1',[another.id]);
+  const {rows:[reviewSource]}=await owner.query(`INSERT INTO farmer_master_sources(document_sha256,document_name,sheet_name,row_number,source_name,source_phone,source_category,match_result)
+   VALUES($1,'test.xlsx','Table 1',31,'HOSTED UPDATED','TEST-REVIEW-PHONE','Satima Farmers','review_required') RETURNING id`,[source]);
+  await owner.query("INSERT INTO farmer_data_issues(farmer_id,field_name,description) VALUES($1,'master_supplier_match','Supplier master row 31: Confirm identity.')",[farmer.id]);
+  assert.equal((await request('/api/operations/flagged-records/'+reviewSource.id,{headers:viewerHeaders})).status,404);
+  const reviewDetail=await request('/api/flagged-records/'+reviewSource.id,{headers});assert.equal(reviewDetail.status,200);
+  const candidateRevision=(await reviewDetail.json()).candidates.find(candidate=>candidate.id===farmer.id).revision;
+  assert.equal((await request('/api/flagged-records/'+reviewSource.id,{method:'POST',headers,body:JSON.stringify({decision:'defer',note:'Awaiting source confirmation.'})})).status,200);
+  assert.equal((await request('/api/flagged-records/'+reviewSource.id,{method:'POST',headers,body:JSON.stringify({decision:'match',farmer_id:farmer.id,expected_revision:candidateRevision,approved_fields:['category'],note:'Confirmed against registration.'})})).status,200);
+  assert.equal((await request('/api/flagged-records/'+reviewSource.id,{method:'POST',headers,body:JSON.stringify({decision:'match',farmer_id:farmer.id})})).status,409,'A resolved source cannot be matched twice');
+  assert.equal((await (await request('/api/flagged-records',{headers})).json()).total,0);
+  const {rows:[newSource]}=await owner.query(`INSERT INTO farmer_master_sources(document_sha256,document_name,sheet_name,row_number,source_name,source_category,match_result)
+   VALUES($1,'test.xlsx','Table 1',32,'TEST PROVISIONAL SUPPLIER','Others','review_required') RETURNING id`,[source]);
+  const createdReview=await request('/api/flagged-records/'+newSource.id,{method:'POST',headers,body:JSON.stringify({decision:'create',note:'No existing match found.'})});
+  assert.equal(createdReview.status,200);const createdFarmer=(await createdReview.json()).farmer_id;
+  assert.equal((await owner.query('SELECT registration_status FROM farmers WHERE id=$1',[createdFarmer])).rows[0].registration_status,'not_registered');
+  assert.equal((await request('/api/flagged-records/'+newSource.id,{method:'POST',headers,body:JSON.stringify({decision:'create'})})).status,409);
+  await owner.query('DELETE FROM farmer_master_reviews WHERE source_id=$1',[newSource.id]);
+  await owner.query('DELETE FROM farmer_master_sources WHERE id=$1',[newSource.id]);
+  await owner.query('DELETE FROM farmer_audit_events WHERE farmer_id=$1',[createdFarmer]);
+  await owner.query('DELETE FROM farmers WHERE id=$1',[createdFarmer]);
  }finally{await owner.end();}
  assert.equal((await request('/api/operations/logout',{method:'POST',headers:viewerHeaders,body:'{}'})).status,200);
  assert.equal((await request('/api/operations/farmers',{headers:viewerHeaders})).status,401);
@@ -579,7 +607,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
  assert.equal((await request('/api/farmers',{headers})).status,401);
  const restricted=new pg.Client({connectionString:`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`});await restricted.connect();
  try{
-  assert.equal((await restricted.query('SELECT full_name FROM farmers')).rows[0].full_name,'HOSTED UPDATED');
+  assert.equal((await restricted.query('SELECT full_name FROM farmers WHERE id=$1',[farmer.id])).rows[0].full_name,'HOSTED UPDATED');
   const persisted=await restricted.query('SELECT image_data FROM farmer_photographs WHERE farmer_id=$1',[farmer.id]);assert.deepEqual(persisted.rows[0].image_data,replacementPhoto,'Photograph persists in PostgreSQL after requests');
   await assert.rejects(restricted.query('DELETE FROM farmers'),e=>e.code==='42501');
   await assert.rejects(restricted.query("UPDATE farmer_audit_events SET actor='forged'"),e=>e.code==='42501');
@@ -614,7 +642,20 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await expiryOwner.query('SELECT count(*)::int AS n FROM form_drafts WHERE device_hash=$1',[deviceHash])).rows[0].n,0,'Logout clears private drafts on this device');
  }finally{await expiryOwner.end();}
  assert.equal((await request('/api/session',{headers:{Cookie:expiredCookie}})).status,401,'Expired persistent sessions are rejected');
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ phase='automatic pooled allocation';
+ const poolLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
+ const poolHeaders={Origin:'https://satima.example','Content-Type':'application/json',Cookie:poolLogin.headers.get('set-cookie').split(';')[0]};
+ const poolCollection=async(amount,farmerId)=>{const response=await request('/api/operations/milk-collections',{method:'POST',headers:{...milkHeaders(poolHeaders,amount,randomUUID()),'X-Farmer-Id':farmerId},body:milkImage});assert.equal(response.status,201);return response.json();};
+ const pooledThree=await poolCollection('3',farmer.id),pooledSeven=await poolCollection('7',farmer.id);
+ for(const [collection,amount] of [[pooledThree,'3'],[pooledSeven,'7']])assert.equal((await request('/api/operations/milk-processing/quality',{method:'POST',headers:poolHeaders,body:JSON.stringify({collection_id:collection.id,accepted_liters:amount,rejected_liters:'0',inspected_on:milkDay,inspected_by:'Test Inspector',idempotency_key:randomUUID()})})).status,201);
+ const autoBatch=(input,key=randomUUID())=>request('/api/operations/milk-processing/batches',{method:'POST',headers:poolHeaders,body:JSON.stringify({processed_on:milkDay,input_liters:input,processed_liters:'2',product_format:'Fresh milk',operator_name:'Test Processor',idempotency_key:key})});
+ const autoKey=randomUUID(),autoResponse=await autoBatch('6',autoKey);assert.equal(autoResponse.status,201,autoResponse.status===201?'':await autoResponse.text());const autoSaved=await autoResponse.json();
+ assert.equal((await autoBatch('6',autoKey)).status,200,'Automatic batch submission is idempotent');
+ const autoDetail=await (await request('/api/operations/milk-processing/batches/'+autoSaved.id,{headers:poolHeaders})).json();
+ assert.equal(autoDetail.input_liters,'6.000000');assert.equal(autoDetail.allocations.length,2);assert.equal(autoDetail.allocations[0].collection_id,pooledThree.id,'Oldest unallocated accepted collection is selected');
+ assert.equal((await autoBatch('5')).status,409,'Accepted pool cannot be overspent');
+ const concurrent=await Promise.all([autoBatch('3'),autoBatch('3')]);assert.deepEqual(concurrent.map(response=>response.status).sort(),[201,409],'Concurrent batches cannot allocate the same accepted milk');
  phase='private directory synchronization';
  const privateDir=await mkdtemp(join(tmpdir(),'satima-sync-test-'));
  try{
