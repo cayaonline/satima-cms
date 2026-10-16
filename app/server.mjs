@@ -41,7 +41,7 @@ for(const page of ['/milk-processing','/milk-distribution']){directoryPages.add(
 for(const page of ['/milk-processing/new','/milk-distribution/new']){directoryPages.add(page);operationsPages.add('/operations'+page);}
 for(const slug of ['satima','larger-sagana','kangema','others']){directoryPages.add('/milk-processing/category/'+slug);operationsPages.add('/operations/milk-processing/category/'+slug);}
 for(const metric of ['received','accepted','rejected','processed','pending']){directoryPages.add('/milk-processing/kpi/'+metric);operationsPages.add('/operations/milk-processing/kpi/'+metric);}
-for(const metric of ['finished','distributed','bottles','records','remaining']){directoryPages.add('/milk-distribution/kpi/'+metric);operationsPages.add('/operations/milk-distribution/kpi/'+metric);}
+for(const metric of ['finished','distributed','records','remaining']){directoryPages.add('/milk-distribution/kpi/'+metric);operationsPages.add('/operations/milk-distribution/kpi/'+metric);}
 directoryPages.add('/milk-processing/awaiting-categorisation');operationsPages.add('/operations/milk-processing/awaiting-categorisation');
 for(const bucket of ['all','verified','pending','invalid','missing','review']){
  directoryPages.add('/farmers/kra-verification/'+bucket);

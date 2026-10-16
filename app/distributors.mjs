@@ -4,7 +4,7 @@ const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const sorts={distributor_code:'substring(d.distributor_code from 2)::bigint',name:'lower(d.name)',record_type:'d.record_type',route_name:'lower(d.route_name)',phone_number:'d.phone_number'};
 const fields=['name','route_name','manager_name','phone_number','location'];
 export async function listDistributors(pool,params){
- const q=(params.get('q')||'').trim().toLowerCase().slice(0,150),type=params.get('type')||'';
+ const q=(params.get('q')||'').trim().toLowerCase().slice(0,150),type=params.get('type')||'',parent=params.get('parent')||'';
  const sort=params.get('sort')||'distributor_code',direction=params.get('direction')||'asc';
  if(!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction))throw new Problem(400,'Invalid distributor sorting.');
  if(type&&!['store','distributor'].includes(type))throw new Problem(400,'Invalid distributor type.');
@@ -12,10 +12,11 @@ export async function listDistributors(pool,params){
  const clauses=[],values=[];
  if(q){values.push('%'+q.replace(/[\\%_]/g,'\\$&')+'%');clauses.push(`lower(d.distributor_code||' '||d.name||' '||coalesce(d.route_name,'')||' '||coalesce(d.manager_name,'')||' '||coalesce(d.phone_number,'')||' '||coalesce(p.name,'')) LIKE $${values.length} ESCAPE E'\\\\'`);}
  if(type){values.push(type);clauses.push(`d.record_type=$${values.length}`);}
+ if(parent){if(!uuid.test(parent))throw new Problem(400,'Invalid parent distributor.');values.push(parent);clauses.push(`d.parent_id=$${values.length}`);}
  const join='FROM distributors d LEFT JOIN distributors p ON p.id=d.parent_id',where=clauses.length?'WHERE '+clauses.join(' AND '):'';
  const {rows:[total]}=await pool.query(`SELECT count(*)::int AS count ${join} ${where}`,values);
- const {rows:[stats]}=await pool.query("SELECT count(*)::int AS total,count(*) FILTER (WHERE record_type='distributor')::int AS distributors,count(*) FILTER (WHERE record_type='store')::int AS stores FROM distributors");
- const {rows:[activity]}=await pool.query("SELECT count(*)::int AS records,coalesce(sum(d.bottles*b.bottle_size_ml::numeric/1000) FILTER (WHERE d.status IN ('dispatched','delivered')),0)::numeric(16,6)::text AS dispatched_liters,coalesce(sum(d.bottles*b.bottle_size_ml::numeric/1000) FILTER (WHERE d.status='delivered'),0)::numeric(16,6)::text AS delivered_liters FROM milk_distributions d JOIN milk_processing_batches b ON b.id=d.batch_id WHERE d.recipient_type='distributor'");
+ const {rows:[stats]}=await pool.query("SELECT count(*) FILTER (WHERE record_type='distributor')::int AS distributors,count(*) FILTER (WHERE record_type='store')::int AS stores,(SELECT count(*)::int FROM customers) AS customers FROM distributors");
+ const {rows:[activity]}=await pool.query("SELECT count(*)::int AS records,coalesce(sum(d.quantity_liters) FILTER (WHERE d.status IN ('dispatched','delivered') AND d.recipient_type='distributor'),0)::numeric(16,6)::text AS store_liters,coalesce(sum(d.quantity_liters) FILTER (WHERE d.status IN ('dispatched','delivered') AND d.recipient_type='customer'),0)::numeric(16,6)::text AS customer_liters FROM milk_distributions d");
  const {rows}=await pool.query(`SELECT d.id,d.distributor_code,d.name,d.record_type,d.parent_id,p.name AS parent_name,d.route_name,d.manager_name,d.phone_number,d.location ${join} ${where} ORDER BY ${sorts[sort]} ${direction} NULLS LAST,d.distributor_code ASC LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,size,(page-1)*size]);
  return {records:rows,stats:{...stats,...activity},pagination:{page,page_size:size,total:total.count,total_pages:Math.max(1,Math.ceil(total.count/size))}};
 }

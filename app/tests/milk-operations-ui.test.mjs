@@ -13,7 +13,7 @@ test('processing and distribution have dedicated same-tab pages in both portals'
   for(const metric of ['received','accepted','rejected','processed','pending'])assert.equal(route(base+'/milk-processing/kpi/'+metric,base).metric,metric);
   assert.equal(route(base+'/milk-distribution',base).module,'distribution');
   assert.equal(route(base+'/milk-distribution/new',base).type,'new-distribution');
-  for(const metric of ['finished','distributed','bottles','records','remaining'])assert.equal(route(base+'/milk-distribution/kpi/'+metric,base).metric,metric);
+  for(const metric of ['finished','distributed','records','remaining'])assert.equal(route(base+'/milk-distribution/kpi/'+metric,base).metric,metric);
   assert.equal(route(base+'/milk-distribution/record/12345678-1234-1234-1234-123456789abc',base).type,'record');
   assert.equal(route(base+'/milk-processing/category/unknown',base),null);
  }
@@ -23,4 +23,11 @@ test('processing and distribution have dedicated same-tab pages in both portals'
   assert.deepEqual(names,['home','farmers','customers','distributors','milk','processing','distribution','support']);
   assert.match(html,/id="milk-operations-content"/);
  }
+});
+test('active operation forms and dashboard do not request bottle counts',()=>{
+ const operations=readFileSync(new URL('../public/milk-operations.js',import.meta.url),'utf8');
+ const home=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8');
+ for(const source of [operations,home])assert.doesNotMatch(source,/bottle|bottled/i);
+ assert.match(operations,/name="quantity_liters"/);
+ assert.match(home,/At a Glance|Milk Supply Chain|Distribution Destinations|Operational Attention/);
 });
