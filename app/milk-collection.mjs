@@ -81,8 +81,34 @@ export async function milkSummary(pool,params=new URLSearchParams()){
 
 export async function milkDetail(pool,id){
  if(!uuid.test(id))throw new Problem(400,'Invalid collection identifier.');
- const {rows:[record]}=await pool.query(`SELECT m.id,m.collection_id,m.farmer_id,f.customer_id AS farmer_code,f.full_name AS farmer_name,m.supplier_category_at_collection AS category,m.quantity_liters::text,m.date_received::text,m.recorded_by,m.source_portal,m.created_at FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id WHERE m.id=$1`,[id]);
- if(!record)throw new Problem(404,'Milk collection not found.');return record;
+ const {rows:[record]}=await pool.query(`SELECT m.id,m.collection_id,m.farmer_id,f.customer_id AS farmer_code,f.full_name AS farmer_name,m.supplier_category_at_collection AS category,m.quantity_liters::text,m.date_received::text,m.recorded_by,m.source_portal,m.created_at,m.updated_at::text AS revision FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id WHERE m.id=$1`,[id]);
+ if(!record)throw new Problem(404,'Milk collection not found.');
+ const {rows:history}=await pool.query('SELECT previous_state,new_state,reason,actor,source_portal,changed_at FROM milk_collection_audit WHERE collection_id=$1 ORDER BY changed_at DESC,id DESC',[id]);
+ return {...record,history};
+}
+
+export async function updateMilkCollection(client,id,input,actor,portal){
+ if(!uuid.test(id))throw new Problem(400,'Invalid collection identifier.');
+ if(!input||typeof input!=='object'||Array.isArray(input))throw new Problem(400,'Invalid correction.');
+ const reason=typeof input.reason==='string'?input.reason.trim():'';
+ if(reason.length<5||reason.length>500)throw new Problem(400,'Enter a brief reason for the correction (5–500 characters).');
+ if(!uuid.test(input.farmer_id||''))throw new Problem(400,'Select a farmer from the directory.');
+ const quantity=String(input.quantity_liters??'');
+ if(!quantityValid(quantity))throw new Problem(400,'Enter a positive quantity in liters with up to six decimal places.');
+ if(!dateValid(input.date_received)||input.date_received>today())throw new Problem(400,'Choose today or an earlier valid delivery date.');
+ const {rows:[old]}=await client.query(`SELECT m.*,m.quantity_liters::text AS quantity_text,m.date_received::text AS received_date,m.updated_at::text AS revision,f.customer_id AS farmer_code,f.full_name AS farmer_name FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id WHERE m.id=$1 FOR UPDATE OF m`,[id]);
+ if(!old)throw new Problem(404,'Milk collection not found.');
+ if(input.revision!==old.revision)throw new Problem(409,'This collection changed. Reopen it before saving your correction.');
+ const {rows:[farmer]}=await client.query('SELECT id,customer_id,full_name,category FROM farmers WHERE id=$1',[input.farmer_id]);
+ if(!farmer)throw new Problem(404,'Farmer not found.');
+ const previous={farmer_id:old.farmer_id,farmer_code:old.farmer_code,farmer_name:old.farmer_name,category:old.supplier_category_at_collection,quantity_liters:old.quantity_text,date_received:old.received_date};
+ const updated={farmer_id:farmer.id,farmer_code:farmer.customer_id,farmer_name:farmer.full_name,category:farmer.id===old.farmer_id?old.supplier_category_at_collection:farmer.category,quantity_liters:quantity,date_received:input.date_received};
+ if(previous.farmer_id===updated.farmer_id&&Number(previous.quantity_liters)===Number(updated.quantity_liters)&&previous.date_received===updated.date_received)throw new Problem(400,'Change at least one collection field before saving.');
+ const {rows:[linked]}=await client.query('SELECT EXISTS(SELECT 1 FROM milk_quality_checks WHERE collection_id=$1) OR EXISTS(SELECT 1 FROM milk_batch_allocations WHERE collection_id=$1) AS has_downstream',[id]);
+ if(linked.has_downstream)throw new Problem(409,'This collection has quality or processing records. An administrator must reconcile the downstream records before correcting it.');
+ const {rows:[saved]}=await client.query('UPDATE milk_collections SET farmer_id=$2,supplier_category_at_collection=$3,quantity_liters=$4,date_received=$5,updated_at=now() WHERE id=$1 RETURNING id,collection_id,updated_at::text AS revision',[id,updated.farmer_id,updated.category,updated.quantity_liters,updated.date_received]);
+ await client.query('INSERT INTO milk_collection_audit(collection_id,previous_state,new_state,reason,actor,source_portal) VALUES($1,$2,$3,$4,$5,$6)',[id,JSON.stringify(previous),JSON.stringify(updated),reason,actor,portal]);
+ return saved;
 }
 
 export async function milkPhoto(pool,id){

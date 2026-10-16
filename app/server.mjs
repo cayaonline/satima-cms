@@ -5,7 +5,7 @@ import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistratio
 import {listFlaggedSuppliers,flaggedSupplierDetail,reviewFlaggedSupplier} from './flagged-suppliers.mjs';
 import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.mjs';
 import {listDistributors,distributorDetail,updateDistributor,distributorAudit} from './distributors.mjs';
-import {milkSubmission,saveMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
+import {milkSubmission,saveMilkCollection,updateMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
 import {homeSummary} from './home.mjs';
 import {createTicket,listTickets,ticketDetail,updateTicket,deliverTicket,retryPending} from './support.mjs';
@@ -75,6 +75,7 @@ async function milkRoutes(req,res,path,url,base,actor,portal){
  }
  const record=path.match(new RegExp('^'+base+'/([a-f0-9-]+)$','i'));
  if(record&&req.method==='GET'){send(res,200,await milkDetail(pool,record[1]));return true;}
+ if(record&&req.method==='PATCH'){const input=await body(req);send(res,200,await transaction(c=>updateMilkCollection(c,record[1],input,actor,portal),actor));return true;}
  const photo=path.match(new RegExp('^'+base+'/([a-f0-9-]+)/photo$','i'));
  if(photo&&req.method==='GET'){res.setHeader('Cache-Control','private, no-store');sendPhotograph(res,await milkPhoto(pool,photo[1]));return true;}
  const history=path.match(new RegExp('^'+base.replace('/milk-collections','')+'/farmers/([a-f0-9-]+)/milk-collections$','i'));

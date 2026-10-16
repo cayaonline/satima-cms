@@ -19,7 +19,8 @@ export async function homeSummary(db,params){
   db.query(`SELECT
    (SELECT count(*)::int FROM farmers WHERE record_kind='registered' AND master_list_status='current') AS farmers,
    (SELECT count(*)::int FROM customers) AS customers,
-   (SELECT count(*)::int FROM distributors WHERE record_type='distributor') AS distributors`,[]),
+   (SELECT count(*)::int FROM distributors WHERE record_type='distributor') AS distributors,
+   (SELECT count(*)::int FROM distributors WHERE record_type='store') AS stores`,[]),
   db.query(`SELECT
    (SELECT count(*)::int FROM milk_collections WHERE date_received BETWEEN $1::date AND $2::date) AS collection_records,
    (SELECT coalesce(sum(quantity_liters),0) FROM milk_collections WHERE date_received BETWEEN $1::date AND $2::date) AS collected_liters,
