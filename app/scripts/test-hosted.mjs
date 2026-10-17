@@ -11,6 +11,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {hashViewerPassword} from '../security.mjs';
 import {PDFDocument} from 'pdf-lib';
+import {importPerformance,loadSource} from './import-milk-performance.mjs';
+import {monthlyView} from '../milk-performance.mjs';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
 const name='satima-hosting-test-'+randomBytes(4).toString('hex');
 const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(9).toString('base64url').slice(0,9),registrationSecret=randomBytes(18).toString('base64url');
@@ -671,7 +673,39 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await expiryOwner.query('SELECT count(*)::int AS n FROM form_drafts WHERE device_hash=$1',[deviceHash])).rows[0].n,0,'Logout clears private drafts on this device');
  }finally{await expiryOwner.end();}
  assert.equal((await request('/api/session',{headers:{Cookie:expiredCookie}})).status,401,'Expired persistent sessions are rejected');
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs','app/tests/milk-performance.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ phase='historical milk performance import';
+ const performanceAdminLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(performanceAdminLogin.status,200);
+ const performanceViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});assert.equal(performanceViewerLogin.status,200);
+ const performanceAdminHeaders={Origin:'https://satima.example',Cookie:performanceAdminLogin.headers.get('set-cookie').split(';')[0]};
+ const performanceViewerHeaders={Origin:'https://satima.example',Cookie:performanceViewerLogin.headers.get('set-cookie').split(';')[0]};
+ const historicalOwner=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await historicalOwner.connect();
+ try{
+  const source={sourceHash:createHash('sha256').update('fixture-workbook').digest('hex'),normalizedHash:createHash('sha256').update('fixture-csv').digest('hex'),worksheet:'Sheet1',weeks:[{year:2026,month:4,week:1,row:2,source_week_label:'WEEK 1',original_expression:'3+2=5',values:{farmers_milk_supply_liters:'5',available_for_pasteurization_liters:'5',milk_out_stores_liters:'2',milk_out_homes_liters:'2',total_milk_out_liters:'4',returns_liters:'1',return_rate_source_fraction:'0.25'},workbook_cells:{},raw:{},issues:[]}]};
+  const options={mode:'apply',csvPath:'/tmp/fixture.csv',workbookPath:'/tmp/fixture.xlsx',actor:'Test administrator'};
+  const first=await importPerformance(historicalOwner,source,options);assert.equal(first.inserted,1);
+  const again=await importPerformance(historicalOwner,source,options);assert.equal(again.already_imported,true);
+  const adminResponse=await request('/api/milk-performance',{headers:performanceAdminHeaders});assert.equal(adminResponse.status,200,await adminResponse.clone().text());const adminPerformance=await adminResponse.json();assert.equal(adminPerformance.selected.label,'April 2026');assert.equal(adminPerformance.totals.farmers_milk_supply_liters.value,'5');
+  const operationsPerformance=await (await request('/api/operations/milk-performance',{headers:performanceViewerHeaders})).json();assert.equal(operationsPerformance.records.length,1);assert.equal(operationsPerformance.records[0].source_filename,undefined);
+  const unsupportedRange=await request('/api/milk-performance?from=2026-04-01&to=2026-04-07',{headers:performanceAdminHeaders});assert.equal(unsupportedRange.status,400);assert.match((await unsupportedRange.json()).error,/no verified calendar dates/);
+  assert.equal((await request('/api/milk-performance')).status,401);assert.equal((await request('/api/operations/milk-performance')).status,401);
+  const corrected={...source,sourceHash:createHash('sha256').update('revised-workbook').digest('hex'),normalizedHash:createHash('sha256').update('revised-csv').digest('hex'),weeks:[{...source.weeks[0],values:{...source.weeks[0].values,farmers_milk_supply_liters:'6'}}]};
+  await assert.rejects(importPerformance(historicalOwner,corrected,options),/review reason/);
+  const revision=await importPerformance(historicalOwner,corrected,{...options,revisionReason:'Source figure corrected after review'});assert.equal(revision.revised,1);
+  const {rows:[versionCount]}=await historicalOwner.query('SELECT count(*)::int AS all_versions,count(*) FILTER (WHERE is_current)::int AS current_versions FROM milk_performance_weeks');assert.deepEqual(versionCount,{all_versions:2,current_versions:1});
+  if(process.env.MILK_PERFORMANCE_CSV&&process.env.MILK_PERFORMANCE_WORKBOOK){
+   const actual=await loadSource(process.env.MILK_PERFORMANCE_CSV,process.env.MILK_PERFORMANCE_WORKBOOK);
+   const options={mode:'apply',csvPath:process.env.MILK_PERFORMANCE_CSV,workbookPath:process.env.MILK_PERFORMANCE_WORKBOOK,actor:'Disposable source validation'};
+   const imported=await importPerformance(historicalOwner,actual,options);assert.equal(imported.inserted,actual.weeks.length);assert.equal(imported.issues,actual.weeks.reduce((n,w)=>n+w.issues.length,0));
+   const repeated=await importPerformance(historicalOwner,actual,options);assert.equal(repeated.already_imported,true);
+   for(const month of [...new Set(actual.weeks.map(w=>w.month))]){
+    const response=await request(`/api/milk-performance?month=2026-${String(month).padStart(2,'0')}`,{headers:performanceAdminHeaders});assert.equal(response.status,200);
+    const report=await response.json(),expected=monthlyView(actual.weeks.filter(w=>w.month===month).map(w=>({...w.values,week_number:w.week})));
+    for(const metric of ['farmers_milk_supply_liters','available_for_pasteurization_liters','total_milk_out_liters','returns_liters'])assert.equal(report.totals[metric].value,expected[metric].value);
+   }
+   console.log('PASS: private May–September source files imported and reconciled in disposable PostgreSQL.');
+  }
+ }finally{await historicalOwner.end();}
  phase='automatic pooled allocation';
  const poolLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example','Content-Type':'application/json'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  const poolHeaders={Origin:'https://satima.example','Content-Type':'application/json',Cookie:poolLogin.headers.get('set-cookie').split(';')[0]};
