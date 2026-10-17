@@ -8,6 +8,7 @@ import {listDistributors,distributorDetail,updateDistributor,distributorAudit} f
 import {milkSubmission,saveMilkCollection,updateMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
 import {homeSummary} from './home.mjs';
+import {performanceReport} from './milk-performance.mjs';
 import {createTicket,listTickets,ticketDetail,updateTicket,deliverTicket,retryPending} from './support.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
@@ -32,6 +33,7 @@ const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/dates.js':['dates.js','text/javascript'],'/flagged-review.js':['flagged-review.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 files['/home-support.js']=['home-support.js','text/javascript'];
+files['/milk-performance.js']=['milk-performance.js','text/javascript'];
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
 directoryPages.add('/farmers');directoryPages.add('/contact-support');
 const operationsPages=new Set(['/operations','/operations/login','/operations/milk-collection','/operations/kra-verification','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others']);
@@ -188,6 +190,7 @@ const server=http.createServer(async(req,res)=>{
   }
   if(await drafts(req,res,path,viewer.role))return;
   if(path==='/api/operations/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
+  if(path==='/api/operations/milk-performance'&&req.method==='GET')return send(res,200,await performanceReport(pool,url.searchParams));
   if(path==='/api/operations/support'&&req.method==='POST'){
    const input=await body(req),result=await transaction(c=>createTicket(c,input,'Operations'));
    const delivery=await deliverTicket(pool,result.id);
@@ -226,6 +229,7 @@ const server=http.createServer(async(req,res)=>{
  if(path==='/api/logout'&&req.method==='POST'){await sessions.revoke(token);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});}
  if(await drafts(req,res,path,'administrator'))return;
  if(path==='/api/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
+ if(path==='/api/milk-performance'&&req.method==='GET')return send(res,200,await performanceReport(pool,url.searchParams,{admin:true}));
  if(path==='/api/support'&&req.method==='POST'){
   const input=await body(req),result=await transaction(c=>createTicket(c,input,'Admin'));
   const delivery=await deliverTicket(pool,result.id);
