@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {parseCsv,normalizedWeeks,monthlyView,detectIssues,units,decimal} from '../milk-performance.mjs';
 import {sameWeek,planImport} from '../scripts/import-milk-performance.mjs';
 import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 
 test('CSV and workbook mappings preserve blank cells and source expressions',()=>{
  const [raw]=parseCsv('\uFEFFreport_year,report_month,week_number,source_worksheet,source_row,source_week_label,farmers_milk_supply_liters,available_for_pasteurization_liters,pstd_inc_cf_source_expression,milk_out_stores_liters,milk_out_homes_liters,total_milk_out_liters,returns_liters,return_rate_source_fraction,inhouse_liters\n2026,October,1,Sheet1,2,WEEK 1,5,5,"3+2=5",2,2,4,1,0.25,\n');
@@ -48,4 +49,68 @@ test('historical overview follows the supply chain in both responsive portal she
  for(const shell of ['index.html','operations.html'])assert.match(readFileSync(new URL('../public/'+shell,import.meta.url),'utf8'),/milk-performance\.js/);
  assert.match(css,/\.performance-table-wrap\{[^}]*overflow-x:auto/);
  assert.match(css,/@media\(max-width:600px\)\{\.performance-heading/);
+});
+
+test('historical sections use the shared monthly API without mixing operational metrics',async()=>{
+ const source=readFileSync(new URL('../public/milk-performance.js',import.meta.url),'utf8');
+ const saved=new Map(),storage={getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)};
+ const browser={};const context={window:browser,sessionStorage:storage,location:{pathname:'/operations'},console};
+ runInNewContext(source,context);
+ const {metrics}=await import('../milk-performance.mjs');
+ const weekly=[1,2,3,4,5].map(week_number=>({week_number,
+  farmers_milk_supply_liters:'5',available_for_pasteurization_liters:'4',
+  pstd_inc_cf_reported_total_liters:'3',milk_out_stores_liters:'2',
+  milk_out_homes_liters:'1',milk_out_raw_liters:'0.5',total_milk_out_liters:'3',
+  total_sales_source_liters:'2.5',returns_liters:'0.5',
+  return_rate_source_fraction:'0.166666',rescued_liters:'0.2',
+  inhouse_liters:String(week_number),rnd_liters:null,
+  carry_forward_pasteurized_liters:String(week_number),
+  carry_forward_raw_liters:week_number===5?null:String(week_number)}));
+ const makeData=month=>({months:[{year:2026,month:9,label:'September 2026'},{year:2026,month:8,label:'August 2026'}],
+  selected:{year:2026,month,label:month===8?'August 2026':'September 2026'},
+  records:weekly,totals:monthlyView(weekly),metrics,issue_count:0});
+ const calls=[],api=async path=>{calls.push(path);return makeData(path.includes('2026-08')?8:9);};
+ function host(){const nodes=new Map();return {isConnected:true,innerHTML:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',textContent:'',value:'',disabled:false,onchange:null});return nodes.get(selector);}};}
+ for(const [scope,present,absent] of [
+  ['collection',['Farmers Milk Supply','25 L','Week 5'],['Pstd + Inc','Milk Out — Stores','Returns & Inventory']],
+  ['processing',['Milk Available for Pasteurization','Pstd + Inc + CF','20 L'],['Farmers Milk Supply','Milk Out — Stores']],
+  ['distribution',['Milk Out — Stores','Milk Out — Homes','Raw Milk Out','Total Milk Out','Source-Reported Total Sales'],['Farmers Milk Supply','Pstd + Inc']]
+ ]){
+  const node=host(),returns=scope==='distribution'?{innerHTML:''}:null;
+  browser.milkPerformance.mountModule(node,api,scope,false,returns);
+  await new Promise(resolve=>setImmediate(resolve));
+  const html=node.querySelector('.performance-results').innerHTML;
+  for(const label of present)assert.match(html,new RegExp(label.replace(/[+]/g,'\\+')));
+  for(const label of absent)assert.doesNotMatch(html,new RegExp(label.replace(/[+]/g,'\\+')));
+  assert.match(html,/without verified calendar dates/);
+  if(returns){
+   assert.match(returns.innerHTML,/Returns & Inventory/);
+   assert.match(returns.innerHTML,/16\.67%/);
+   assert.match(returns.innerHTML,/Latest weekly reading/);
+   assert.match(returns.innerHTML,/Not reported/);
+   assert.doesNotMatch(returns.innerHTML,/25 L/);
+  }
+  node.querySelector('.performance-month').value='2026-08';
+  await node.querySelector('.performance-month').onchange();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(storage.getItem('satima-performance-month'),'2026-08');
+  assert.equal(node.querySelector('.performance-month').value,'2026-08');
+ }
+ assert.ok(calls.every(path=>path.startsWith('/milk-performance')));
+ const home=host();browser.milkPerformance.mountHome(home,api,false);await new Promise(resolve=>setImmediate(resolve));
+ const summary=home.querySelector('.performance-results').innerHTML;
+ assert.match(summary,/\/operations\/milk-collection/);
+ assert.match(summary,/\/operations\/milk-processing/);
+ assert.match(summary,/\/operations\/milk-distribution/);
+ assert.doesNotMatch(summary,/<table/);
+});
+
+test('historical sections remain on overview routes and returns precede distribution trends',()=>{
+ const collection=readFileSync(new URL('../public/milk.js',import.meta.url),'utf8');
+ const operations=readFileSync(new URL('../public/milk-operations.js',import.meta.url),'utf8');
+ assert.ok(collection.indexOf('id="milk-reporting"')<collection.indexOf('id="milk-historical"'));
+ assert.ok(collection.indexOf('id="milk-historical"')<collection.indexOf('id="milk-stats"'));
+ assert.ok(operations.indexOf('id="operation-historical"')<operations.indexOf('id="operation-stats"'));
+ assert.ok(operations.indexOf('id="operation-returns"')<operations.indexOf('id="operation-trends"'));
+ assert.match(operations,/isProcessing\?'processing':'distribution'/);
 });
