@@ -4,7 +4,7 @@ export const months=['January','February','March','April','May','June','July','A
 export const metrics=[
  ['Milk Collection','Farmers Milk Supply','farmers_milk_supply_liters','flow'],
  ['Milk Processing','Milk Available for Pasteurization','available_for_pasteurization_liters','flow'],
- ['Milk Processing','Pstd + Inc + CF (reported)','pstd_inc_cf_reported_total_liters','flow'],
+ ['Milk Processing','Pstd + Inc + CF (Source Reported)','pstd_inc_cf_reported_total_liters','flow'],
  ['Milk Distribution','Milk Out — Stores','milk_out_stores_liters','flow'],
  ['Milk Distribution','Milk Out — Homes','milk_out_homes_liters','flow'],
  ['Milk Distribution','Raw Milk Out','milk_out_raw_liters','flow'],
@@ -12,7 +12,7 @@ export const metrics=[
  ['Milk Distribution','Source-Reported Total Sales','total_sales_source_liters','flow'],
  ['Returns and Inventory','Returns','returns_liters','flow'],
  ['Returns and Inventory','Return Percentage','return_rate_source_fraction','rate'],
- ['Returns and Inventory','Rescued','rescued_liters','flow'],
+ ['Returns and Inventory','Rescued Milk','rescued_liters','flow'],
  ['Returns and Inventory','In-House','inhouse_liters','latest'],
  ['Returns and Inventory','R&D','rnd_liters','flow'],
  ['Returns and Inventory','Carry Forward — Pasteurized','carry_forward_pasteurized_liters','latest'],
@@ -75,7 +75,7 @@ function monthlyViewFlow(weeks,key){const vals=weeks.map(r=>r[key]);return vals.
 export async function performanceReport(db,params,{admin=false}={}){
  const {rows:available}=await db.query(`SELECT report_year,report_month,count(*)::int AS weeks FROM milk_performance_weeks WHERE is_current GROUP BY report_year,report_month ORDER BY report_year DESC,report_month DESC`);
  const monthsAvailable=available.map(r=>({year:r.report_year,month:r.report_month,label:`${months[r.report_month-1]} ${r.report_year}`,weeks:r.weeks}));
- if(!monthsAvailable.length)return {months:[],selected:null,records:[],totals:null,metrics,issue_count:0};
+ if(!monthsAvailable.length)return {months:[],selected:null,records:[],totals:null,metrics,issue_count:0,issue_metrics:{}};
  if(params.has('from')||params.has('to'))throw new Problem(400,'Historical weeks have no verified calendar dates; custom date filtering is unavailable.');
  const selectedValue=params.get('month')||`${available[0].report_year}-${String(available[0].report_month).padStart(2,'0')}`;
  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedValue))throw new Problem(400,'Invalid historical month.');
@@ -85,5 +85,6 @@ export async function performanceReport(db,params,{admin=false}={}){
  const {rows:issues}=await db.query(`SELECT i.week_id,i.metric,i.reported_value::text,i.calculated_value::text,i.difference::text,i.note,i.review_status FROM milk_performance_issues i JOIN milk_performance_weeks w ON w.id=i.week_id WHERE w.is_current AND w.report_year=$1 AND w.report_month=$2 ORDER BY w.week_number,i.id`,[year,month]);
  const byWeek=new Map();for(const issue of issues){const a=byWeek.get(issue.week_id)||[];a.push(issue);byWeek.set(issue.week_id,a);}
  const records=rows.map(r=>{const {source_filename,source_sha256,source_worksheet,imported_at,id,...publicRecord}=r;const issues=byWeek.get(id)||[];return {...publicRecord,...(admin?{source_filename,source_sha256,source_worksheet,source_week_id:id,imported_at,issues}:{issue_count:issues.length})};});
- return {months:monthsAvailable,selected:{year,month,label:`${months[month-1]} ${year}`,weeks:records.length},records,totals:monthlyView(records),metrics,issue_count:issues.length,source_kind:'Historical weekly workbook report; separate from operational transactions'};
+ const issue_metrics={};for(const issue of issues)issue_metrics[issue.metric]=(issue_metrics[issue.metric]||0)+1;
+ return {months:monthsAvailable,selected:{year,month,label:`${months[month-1]} ${year}`,weeks:records.length},records,totals:monthlyView(records),metrics,issue_count:issues.length,issue_metrics,source_kind:'Historical weekly workbook report; separate from operational transactions'};
 }
