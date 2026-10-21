@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {completeMonth,businessReport,latestBusinessMonth} from '../business-reporting.mjs';
+import {completeMonth,businessReport,latestBusinessMonth,historicalSupplyMonths} from '../business-reporting.mjs';
 
 test('historical actuals apply only to complete source months, never inferred days',async()=>{
  assert.equal(completeMonth('2026-09-01','2026-09-30'),'2026-09');
@@ -19,4 +19,12 @@ test('unimported full months use recorded operations and current defaults follow
  const choice=await businessReport(db,'2026-10-01','2026-10-31');
  assert.equal(choice.source,'operations');
  assert.equal(choice.report,null);
+});
+
+test('monthly collection trend uses complete source weeks and preserves incomplete months',async()=>{
+ const rows=[1,2,3,4].map(week_number=>({report_year:2026,report_month:8,week_number,farmers_milk_supply_liters:'2.5'}));
+ rows.push({report_year:2026,report_month:9,week_number:1,farmers_milk_supply_liters:'3'});
+ rows.push({report_year:2026,report_month:9,week_number:2,farmers_milk_supply_liters:null});
+ const db={async query(){return {rows};}};
+ assert.deepEqual(await historicalSupplyMonths(db),[{month:'2026-08',label:'August 2026',liters:'10'},{month:'2026-09',label:'September 2026',liters:null}]);
 });

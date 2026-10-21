@@ -1,4 +1,4 @@
-import {performanceReport} from './milk-performance.mjs';
+import {performanceReport,monthlyView,months} from './milk-performance.mjs';
 
 // Source weeks have no verified dates. Only an entire calendar month can use
 // their aggregate values; a day or partial-month range remains transactional.
@@ -16,6 +16,12 @@ export async function businessReport(db,from,to){
  if(!available)return {source:'operations',month,report:null,reason:'No historical aggregate is imported for this month.'};
  const report=await performanceReport(db,new URLSearchParams({month}));
  return {source:'historical',month,report,reason:'Source-reported business actuals; individual operations remain separate.'};
+}
+
+export async function historicalSupplyMonths(db){
+ const {rows}=await db.query('SELECT report_year,report_month,week_number,farmers_milk_supply_liters::text FROM milk_performance_weeks WHERE is_current ORDER BY report_year,report_month,week_number');
+ const grouped=new Map();for(const row of rows){const key=`${row.report_year}-${String(row.report_month).padStart(2,'0')}`;if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(row);}
+ return [...grouped].map(([month,weeks])=>({month,label:`${months[Number(month.slice(5))-1]} ${month.slice(0,4)}`,liters:monthlyView(weeks).farmers_milk_supply_liters.value}));
 }
 
 export async function latestBusinessMonth(db){

@@ -1,5 +1,5 @@
 import {Problem} from './store.mjs';
-import {businessReport} from './business-reporting.mjs';
+import {businessReport,historicalSupplyMonths} from './business-reporting.mjs';
 
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const categories=['Satima Farmers','Larger Sagana Farmers','Kangema Farmers','Others'];
@@ -70,7 +70,9 @@ export async function milkSummary(pool,params=new URLSearchParams()){
   const {rows:weekly}=await pool.query(`SELECT date_trunc('week',m.date_received)::date::text AS label,sum(m.quantity_liters)::text AS liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
   const {rows:monthly}=await pool.query(`SELECT date_trunc('month',m.date_received)::date::text AS label,sum(m.quantity_liters)::text AS liters FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
   const {rows:categories}=await pool.query(`SELECT coalesce(m.supplier_category_at_collection,'Awaiting Categorisation') AS category,coalesce(sum(m.quantity_liters),0)::text AS liters,count(*)::int AS deliveries FROM milk_collections m JOIN farmers f ON f.id=m.farmer_id ${where} GROUP BY 1 ORDER BY 1`,values);
-  return {totals,daily,weekly,monthly,categories,business:await businessReport(pool,params.get('from'),params.get('to'))};
+  const business=await businessReport(pool,params.get('from'),params.get('to'));
+  if(business.source==='historical')business.monthly_supply=await historicalSupplyMonths(pool);
+  return {totals,daily,weekly,monthly,categories,business};
  }
  const {rows:[totals]}=await pool.query(`SELECT coalesce(sum(quantity_liters) FILTER (WHERE date_received=(now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS today_liters,coalesce(sum(quantity_liters) FILTER (WHERE date_received>=date_trunc('week',now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS week_liters,coalesce(sum(quantity_liters) FILTER (WHERE date_received>=date_trunc('month',now() AT TIME ZONE 'Africa/Nairobi')::date),0)::text AS month_liters,count(DISTINCT farmer_id) FILTER (WHERE date_received=(now() AT TIME ZONE 'Africa/Nairobi')::date)::int AS farmers_today FROM milk_collections`);
  const {rows:daily}=await pool.query(`SELECT day::date::text AS label,coalesce(sum(m.quantity_liters),0)::text AS liters FROM generate_series((now() AT TIME ZONE 'Africa/Nairobi')::date-29,(now() AT TIME ZONE 'Africa/Nairobi')::date,interval '1 day') AS days(day) LEFT JOIN milk_collections m ON m.date_received=day::date GROUP BY day ORDER BY day`);

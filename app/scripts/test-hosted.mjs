@@ -737,6 +737,8 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
    }
    const partial=await (await request('/api/milk-collections/summary?from=2026-09-01&to=2026-09-07',{headers:performanceAdminHeaders})).json();
    assert.equal(partial.business.source,'operations','Unverified source weeks cannot masquerade as daily totals');
+   const collectionMonths=await (await request('/api/milk-collections/summary?'+september,{headers:performanceAdminHeaders})).json();
+   assert.deepEqual(collectionMonths.business.monthly_supply.map(row=>row.liters),['6','4348','3981.5','5003.5','3687','5800']);
    const {rows:[overlapRow]}=await historicalOwner.query('SELECT id,date_received::text AS original_date FROM milk_collections ORDER BY created_at LIMIT 1');
    assert.ok(overlapRow,'The disposable test has a recorded collection');
    try{
