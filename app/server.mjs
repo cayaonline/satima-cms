@@ -9,6 +9,7 @@ import {milkSubmission,saveMilkCollection,updateMilkCollection,searchMilkFarmers
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
 import {homeSummary} from './home.mjs';
 import {performanceReport} from './milk-performance.mjs';
+import {inventorySummary,proposeOpening,reviewOpening} from './milk-inventory.mjs';
 import {createTicket,listTickets,ticketDetail,updateTicket,deliverTicket,retryPending} from './support.mjs';
 import http from 'node:http';
 import {requestPolicy} from './hosting.mjs';
@@ -191,6 +192,7 @@ const server=http.createServer(async(req,res)=>{
   if(await drafts(req,res,path,viewer.role))return;
   if(path==='/api/operations/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
   if(path==='/api/operations/milk-performance'&&req.method==='GET')return send(res,200,await performanceReport(pool,url.searchParams));
+  if(path==='/api/operations/milk-inventory'&&req.method==='GET')return send(res,200,await inventorySummary(pool));
   if(path==='/api/operations/support'&&req.method==='POST'){
    const input=await body(req),result=await transaction(c=>createTicket(c,input,'Operations'));
    const delivery=await deliverTicket(pool,result.id);
@@ -230,6 +232,14 @@ const server=http.createServer(async(req,res)=>{
  if(await drafts(req,res,path,'administrator'))return;
  if(path==='/api/home'&&req.method==='GET')return send(res,200,await homeSummary(pool,url.searchParams));
  if(path==='/api/milk-performance'&&req.method==='GET')return send(res,200,await performanceReport(pool,url.searchParams,{admin:true}));
+ if(path==='/api/milk-inventory'&&req.method==='GET')return send(res,200,await inventorySummary(pool,{admin:true}));
+ if(path==='/api/milk-inventory/opening-balances'&&req.method==='POST'){
+  const input=await body(req),saved=await transaction(c=>proposeOpening(c,input,'Administrator'),'Administrator');return send(res,saved.already_saved?200:201,saved);
+ }
+ const openingReview=path.match(/^\/api\/milk-inventory\/opening-balances\/([^/]+)\/review$/);
+ if(openingReview&&req.method==='POST'){
+  const input=await body(req);return send(res,200,await transaction(c=>reviewOpening(c,openingReview[1],input,'Administrator'),'Administrator'));
+ }
  if(path==='/api/support'&&req.method==='POST'){
   const input=await body(req),result=await transaction(c=>createTicket(c,input,'Admin'));
   const delivery=await deliverTicket(pool,result.id);
