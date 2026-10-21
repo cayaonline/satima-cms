@@ -723,6 +723,34 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
     const report=await response.json(),expected=monthlyView(actual.weeks.filter(w=>w.month===month).map(w=>({...w.values,week_number:w.week})));
     for(const metric of ['farmers_milk_supply_liters','available_for_pasteurization_liters','total_milk_out_liters','returns_liters'])assert.equal(report.totals[metric].value,expected[metric].value);
    }
+   const september='from=2026-09-01&to=2026-09-30';
+   const businessRoutes=['/home?period=custom&'+september,'/milk-collections/summary?'+september,'/milk-processing/summary?'+september,'/milk-distribution/summary?'+september];
+   for(const route of businessRoutes){
+    for(const [prefix,headers] of [['/api',performanceAdminHeaders],['/api/operations',performanceViewerHeaders]]){
+     const response=await request(prefix+route,{headers});assert.equal(response.status,200,prefix+route);
+     const data=await response.json();assert.equal(data.business.source,'historical');assert.equal(data.business.report.selected.label,'September 2026');
+     assert.equal(data.business.report.totals.farmers_milk_supply_liters.value,'5800');
+     assert.equal(data.business.report.totals.available_for_pasteurization_liters.value,'5631.5');
+     assert.equal(data.business.report.totals.total_milk_out_liters.value,'5704.5');
+     assert.equal(data.business.report.records.length,5);
+    }
+   }
+   const partial=await (await request('/api/milk-collections/summary?from=2026-09-01&to=2026-09-07',{headers:performanceAdminHeaders})).json();
+   assert.equal(partial.business.source,'operations','Unverified source weeks cannot masquerade as daily totals');
+   const {rows:[overlapRow]}=await historicalOwner.query('SELECT id,date_received::text AS original_date FROM milk_collections ORDER BY created_at LIMIT 1');
+   assert.ok(overlapRow,'The disposable test has a recorded collection');
+   try{
+    await historicalOwner.query("UPDATE milk_collections SET date_received='2026-09-15' WHERE id=$1",[overlapRow.id]);
+    const overlap=await (await request('/api/milk-collections/summary?'+september,{headers:performanceAdminHeaders})).json();
+    assert.equal(overlap.business.report.totals.farmers_milk_supply_liters.value,'5800','The source total is not increased by its underlying record');
+    assert.ok(Number(overlap.totals.period_liters)>0,'The underlying operational quantity remains separately available');
+   }finally{await historicalOwner.query('UPDATE milk_collections SET date_received=$2 WHERE id=$1',[overlapRow.id,overlapRow.original_date]);}
+   const activeMonth=milkDay.slice(0,7),[activeYear,activeNumber]=activeMonth.split('-').map(Number);
+   if(activeMonth>'2026-09'){
+    const activeEnd=new Date(Date.UTC(activeYear,activeNumber,0)).toISOString().slice(0,10);
+    const live=await (await request(`/api/milk-collections/summary?from=${activeMonth}-01&to=${activeEnd}`,{headers:performanceAdminHeaders})).json();
+    assert.equal(live.business.source,'operations');assert.ok(Number(live.totals.period_liters)>0,'New records automatically feed the next operational month');
+   }
    console.log('PASS: private May–September source files imported and reconciled in disposable PostgreSQL.');
   }
  }finally{await historicalOwner.end();}

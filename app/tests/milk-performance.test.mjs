@@ -41,11 +41,13 @@ test('repeat imports skip identical weeks and corrected values require a revisio
  assert.equal(planImport([{...week,values:{farmers_milk_supply_liters:'6'}}],[old])[0].action,'revise');
 });
 
-test('historical overview follows the supply chain in both responsive portal shells',()=>{
+test('original supply chain and KPI sections consume business actuals in both responsive portal shells',()=>{
  const home=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8');
  const css=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
- assert.ok(home.indexOf('Milk Supply Chain')<home.indexOf('id="milk-performance"'));
- assert.ok(home.indexOf('id="milk-performance"')<home.indexOf('Milk Volume Overview'));
+ assert.ok(home.indexOf('At a Glance')<home.indexOf('Milk Supply Chain'));
+ assert.ok(home.indexOf('Milk Supply Chain')<home.indexOf('Milk Volume Overview'));
+ assert.match(home,/businessCard\('Milk Collected','farmers_milk_supply_liters'/);
+ assert.match(home,/businessCard\('Total Milk Out','total_milk_out_liters'/);
  for(const shell of ['index.html','operations.html'])assert.match(readFileSync(new URL('../public/'+shell,import.meta.url),'utf8'),/milk-performance\.js/);
  assert.match(css,/\.performance-table-wrap\{[^}]*overflow-x:auto/);
  assert.match(css,/@media\(max-width:600px\)\{\.performance-heading/);
@@ -110,14 +112,14 @@ test('historical sections use the shared monthly API without mixing operational 
  assert.doesNotMatch(summary,/<table/);
 });
 
-test('historical sections remain on overview routes and returns precede distribution trends',()=>{
+test('weekly breakdown follows primary operating metrics and returns precede distribution trends',()=>{
  const collection=readFileSync(new URL('../public/milk.js',import.meta.url),'utf8');
  const operations=readFileSync(new URL('../public/milk-operations.js',import.meta.url),'utf8');
  assert.ok(operations.indexOf('id="operation-returns"')<operations.indexOf('id="operation-inventory"'));
  assert.ok(operations.indexOf('id="operation-inventory"')<operations.indexOf('id="operation-trends"'));
- assert.ok(collection.indexOf('id="milk-reporting"')<collection.indexOf('id="milk-historical"'));
- assert.ok(collection.indexOf('id="milk-historical"')<collection.indexOf('id="milk-stats"'));
- assert.ok(operations.indexOf('id="operation-historical"')<operations.indexOf('id="operation-stats"'));
+ assert.ok(collection.indexOf('id="milk-reporting"')<collection.indexOf('id="milk-stats"'));
+ assert.ok(collection.indexOf('id="milk-stats"')<collection.indexOf('id="historical-weekly"'));
+ assert.ok(operations.indexOf('id="operation-stats"')<operations.indexOf('id="historical-weekly"'));
  assert.ok(operations.indexOf('id="operation-returns"')<operations.indexOf('id="operation-trends"'));
  assert.match(operations,/isProcessing\?'processing':'distribution'/);
 });
