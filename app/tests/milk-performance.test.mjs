@@ -68,7 +68,9 @@ test('historical sections use the shared monthly API without mixing operational 
   carry_forward_raw_liters:week_number===5?null:String(week_number)}));
  const makeData=month=>({months:[{year:2026,month:9,label:'September 2026'},{year:2026,month:8,label:'August 2026'}],
   selected:{year:2026,month,label:month===8?'August 2026':'September 2026'},
-  records:weekly,totals:monthlyView(weekly),metrics,issue_count:0});
+  records:weekly,totals:monthlyView(weekly),metrics,issue_count:0,
+  previous_month:{label:'August 2026',farmers_milk_supply_liters:'20'},
+  reconciliation:Object.fromEntries(['collection','processing','distribution'].map(scope=>[scope,{status:'not_comparable',reason:'Historical weeks do not have verified dates.',reported_liters:'25',recorded_liters:null,difference_liters:null,source_issue_count:0}]))});
  const calls=[],api=async path=>{calls.push(path);return makeData(path.includes('2026-08')?8:9);};
  function host(){const nodes=new Map();return {isConnected:true,innerHTML:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',textContent:'',value:'',disabled:false,onchange:null});return nodes.get(selector);}};}
  for(const [scope,present,absent] of [
@@ -83,6 +85,9 @@ test('historical sections use the shared monthly API without mixing operational 
   for(const label of present)assert.match(html,new RegExp(label.replace(/[+]/g,'\\+')));
   for(const label of absent)assert.doesNotMatch(html,new RegExp(label.replace(/[+]/g,'\\+')));
   assert.match(html,/without verified calendar dates/);
+  assert.match(html,/Historical \/ Recorded Reconciliation/);
+  assert.match(html,/Not Comparable/);
+  if(scope==='collection')assert.match(html,/Previous reported month/);
   if(returns){
    assert.match(returns.innerHTML,/Returns & Inventory/);
    assert.match(returns.innerHTML,/16\.67%/);
@@ -108,6 +113,8 @@ test('historical sections use the shared monthly API without mixing operational 
 test('historical sections remain on overview routes and returns precede distribution trends',()=>{
  const collection=readFileSync(new URL('../public/milk.js',import.meta.url),'utf8');
  const operations=readFileSync(new URL('../public/milk-operations.js',import.meta.url),'utf8');
+ assert.ok(operations.indexOf('id="operation-returns"')<operations.indexOf('id="operation-inventory"'));
+ assert.ok(operations.indexOf('id="operation-inventory"')<operations.indexOf('id="operation-trends"'));
  assert.ok(collection.indexOf('id="milk-reporting"')<collection.indexOf('id="milk-historical"'));
  assert.ok(collection.indexOf('id="milk-historical"')<collection.indexOf('id="milk-stats"'));
  assert.ok(operations.indexOf('id="operation-historical"')<operations.indexOf('id="operation-stats"'));

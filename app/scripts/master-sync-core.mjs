@@ -2,7 +2,7 @@
 export const schema={
  farmers:{table:'farmers',code:'customer_id',name:'full_name',phone:'primary_phone',fields:['full_name','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','category'],columns:['id','customer_id','full_name','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','category']},
  customers:{table:'customers',code:'customer_id',name:'full_name',phone:'phone_number',fields:['full_name','phone_number','physical_address','category'],columns:['id','customer_id','full_name','phone_number','physical_address','category']},
- distributors:{table:'distributors',code:'distributor_code',name:'name',phone:'phone_number',fields:['name','phone_number','location','route_name','manager_name'],columns:['id','distributor_code','name','phone_number','location','route_name','manager_name','record_type','parent_id']}
+ distributors:{table:'distributors',code:'distributor_code',name:'name',phone:'phone_number',fields:['name','phone_number','location','route_name','manager_name'],columns:['id','distributor_code','store_code','name','phone_number','location','route_name','manager_name','record_type','parent_id']}
 };
 export const normalizedName=value=>String(value||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('en');
 export function canonicalRows(entity,rows){
@@ -45,14 +45,14 @@ export function planSync(entity,sourceRows,existing){
   const phone=normalizedPhone(source[spec.phone]),code=String(source[spec.code]||'').trim();
   if(categories[entity]&&nonempty(source.category)&&!categories[entity].has(source.category))throw new Error('Unknown category in source.');
   if(entity==='distributors'&&!['distributor','store'].includes(source.record_type))throw new Error('Distributor type is required.');
-  const byCode=code?records.filter(item=>item[spec.code]===code):[];
+  const byCode=code?records.filter(item=>item[spec.code]===code||(entity==='distributors'&&item.store_code===code)):[];
   const byIdentity=phone?records.filter(item=>normalizedName(item[spec.name])===normalizedName(name)&&normalizedPhone(item[spec.phone])===phone):[];
   const candidates=[...new Map([...byCode,...byIdentity].map(item=>[item.id||item._temporary,item])).values()];
   let result,reason='',record=null,changes={};
   if(candidates.length>1){result='review';reason='Conflicting identifiers';}
   else if(candidates.length===1){
    record=candidates[0];
-   const stable=normalizedName(record[spec.name])===normalizedName(name)||(phone&&normalizedPhone(record[spec.phone])===phone);
+   const stable=(entity!=='distributors'||record.record_type===source.record_type)&&(normalizedName(record[spec.name])===normalizedName(name)||(phone&&normalizedPhone(record[spec.phone])===phone));
    if(!stable){result='review';reason='Identifier conflicts with both name and phone';}
    else if(record._temporary||seenMatches.has(record.id)){result='review';reason='Repeated source identity';}
    else{
