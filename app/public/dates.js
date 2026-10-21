@@ -24,15 +24,15 @@
  function periodMarkup(prefix){return `<section class="reporting-controls card" aria-label="Reporting period"><h2>Reporting Period</h2><div class="reporting-presets" role="group" aria-label="Reporting period shortcuts">${[['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['custom','Custom Range']].map(([value,label])=>`<button type="button" class="secondary" data-period="${value}" aria-pressed="false">${label}</button>`).join('')}</div><div class="reporting-fields"><label>From<input id="${prefix}-from" type="date"></label><label>To<input id="${prefix}-to" type="date"></label><button type="button" class="primary" id="${prefix}-apply">Apply Range</button></div><p id="${prefix}-range" class="muted" aria-live="polite"></p><p id="${prefix}-error" class="error" role="alert"></p></section>`;}
  function attachPeriod(host,prefix,storageKey,onApply,defaultKind='daily'){
   host.innerHTML=periodMarkup(prefix);bind(host);
-  let saved;try{saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');}catch{saved=null;}
+  let saved;try{saved=JSON.parse(sessionStorage.getItem('satima-business-range')||sessionStorage.getItem(storageKey)||'null');}catch{saved=null;}
   let kind=saved?.kind||defaultKind;const from=host.querySelector('#'+prefix+'-from'),to=host.querySelector('#'+prefix+'-to'),error=host.querySelector('#'+prefix+'-error');
   const initial=saved?.from&&saved?.to?saved:preset(kind)||preset('daily');from.value=initial.from;to.value=initial.to;
   const paint=()=>{host.querySelectorAll('[data-period]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.period===kind)));host.querySelector('#'+prefix+'-range').textContent=`${format(from.value)} – ${format(to.value)}`;window.satimaDates.refresh();};
-  const apply=()=>{error.textContent='';if(!validIso(from.value)||!validIso(to.value)||from.value>to.value){error.textContent='Choose a valid From and To date in DD/MM/YYYY order.';return;}const state={kind,from:from.value,to:to.value};sessionStorage.setItem(storageKey,JSON.stringify(state));paint();onApply(state);};
+  const apply=()=>{error.textContent='';if(!validIso(from.value)||!validIso(to.value)||from.value>to.value){error.textContent='Choose a valid From and To date in DD/MM/YYYY order.';return;}const state={kind,from:from.value,to:to.value};sessionStorage.setItem('satima-business-range',JSON.stringify(state));for(const key of ['satima-milk-collection-period','satima-milk-processing-period','satima-milk-distribution-period'])sessionStorage.setItem(key,JSON.stringify(state));sessionStorage.setItem('satima-reporting-period',JSON.stringify({period:'custom',from:state.from,to:state.to}));paint();onApply(state);document.dispatchEvent(new CustomEvent('satima:reporting-range',{detail:state}));};
   host.querySelectorAll('[data-period]').forEach(button=>button.onclick=()=>{kind=button.dataset.period;if(kind!=='custom'){const dates=preset(kind);from.value=dates.from;to.value=dates.to;apply();}else paint();});
   for(const input of [from,to])input.addEventListener('change',()=>{kind='custom';paint();});
   host.querySelector('#'+prefix+'-apply').onclick=apply;paint();
-  return {get:()=>({kind,from:from.value,to:to.value}),apply};
+  return {get:()=>({kind,from:from.value,to:to.value}),apply,set:(nextFrom,nextTo)=>{kind='custom';from.value=nextFrom;to.value=nextTo;apply();}};
  }
  const observer=new MutationObserver(records=>{if(records.some(record=>record.addedNodes.length))bind();});
  document.addEventListener('DOMContentLoaded',()=>{bind();observer.observe(document.body,{childList:true,subtree:true});});

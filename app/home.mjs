@@ -1,4 +1,5 @@
 import {Problem} from './store.mjs';
+import {businessReport,latestBusinessMonth} from './business-reporting.mjs';
 
 export function reportingPeriod(params, today=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Nairobi',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())) {
  const period=params.get('period')||'custom';
@@ -14,7 +15,12 @@ export function reportingPeriod(params, today=new Intl.DateTimeFormat('en-CA',{t
 }
 
 export async function homeSummary(db,params){
- const range=reportingPeriod(params),dates=[range.from,range.to];
+ let range=reportingPeriod(params);
+ if(!params.has('period')&&!params.has('from')&&!params.has('to')){
+  const latest=await latestBusinessMonth(db);
+  if(latest){const [year,month]=latest.split('-').map(Number),monthEnd=new Date(Date.UTC(year,month,0)).toISOString().slice(0,10),today=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Nairobi',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());range={period:'custom',from:latest+'-01',to:monthEnd<today?monthEnd:today};}
+ }
+ const dates=[range.from,range.to];
  const [network,operations,trend]=await Promise.all([
   db.query(`SELECT
    (SELECT count(*)::int FROM farmers WHERE record_kind='registered' AND master_list_status='current') AS farmers,
@@ -43,5 +49,5 @@ export async function homeSummary(db,params){
    UNION ALL SELECT processed_on,0,0,0,sum(processed_liters) FROM milk_processing_batches WHERE processed_on BETWEEN $1::date AND $2::date GROUP BY 1)
    SELECT day::text,sum(collected) AS collected_liters,sum(accepted) AS accepted_liters,sum(rejected) AS rejected_liters,sum(processed) AS processed_liters FROM daily GROUP BY day ORDER BY day DESC LIMIT 31`,dates)
  ]);
- return {range,network:network.rows[0],operations:operations.rows[0],trend:trend.rows.reverse(),date:new Intl.DateTimeFormat('en-KE',{timeZone:'Africa/Nairobi',dateStyle:'full'}).format(new Date()),note:'Each stage is counted by its own recorded date; period totals are not one reconciled milk cohort.'};
+ return {range,network:network.rows[0],operations:operations.rows[0],business:await businessReport(db,range.from,range.to),trend:trend.rows.reverse(),date:new Intl.DateTimeFormat('en-KE',{timeZone:'Africa/Nairobi',dateStyle:'full'}).format(new Date()),note:'Each stage has its own source definition and date; period totals are not one reconciled milk cohort.'};
 }

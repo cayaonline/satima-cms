@@ -6,6 +6,16 @@
  const selectedKey=data=>data.selected?`${data.selected.year}-${String(data.selected.month).padStart(2,'0')}`:'';
  const metric=(data,key)=>data.metrics.find(item=>item.key===key);
  const total=(data,key)=>{const value=data.totals[key]?.value;if(value===null||value===undefined)return data.records.some(row=>row[key]!==null&&row[key]!==undefined)?'Incomplete':'Not reported';return shown(value,metric(data,key)?.aggregation==='rate');};
+ const businessValue=(business,key)=>business?.source==='historical'?business.report.totals[key]?.value:null;
+ const businessShown=(business,key)=>{if(business?.source!=='historical')return null;return total(business.report,key);};
+ const weeklyBars=(business,keys)=>{const report=business?.report;if(!report)return '';const values=report.records.flatMap(row=>keys.map(key=>row[key]===null?null:Number(row[key])).filter(value=>value!==null));const max=Math.max(1,...values);return `<div class="performance-trend" role="img" aria-label="Source-reported weekly business volumes">${report.records.map(row=>`<div class="performance-trend-item"><span class="performance-trend-value">${keys.map(key=>row[key]===null?'—':esc(shown(row[key]))).join(' / ')}</span><span class="performance-trend-track">${keys.map((key,index)=>row[key]===null?'':`<span class="${index?'performance-trend-secondary':''}" title="${esc(metric(report,key)?.label||key)}: ${esc(shown(row[key]))}" style="height:${Math.max(2,Number(row[key])/max*100)}%"></span>`).join('')}</span><span>Week ${row.week_number}</span></div>`).join('')}</div>`;};
+ const syncMonth=(month)=>{sessionStorage.setItem(storageKey,month);const [year,m]=month.split('-').map(Number),from=month+'-01',to=new Date(Date.UTC(year,m,0)).toISOString().slice(0,10);sessionStorage.setItem('satima-business-range',JSON.stringify({kind:'custom',from,to}));for(const key of ['satima-milk-collection-period','satima-milk-processing-period','satima-milk-distribution-period'])sessionStorage.setItem(key,JSON.stringify({kind:'custom',from,to}));sessionStorage.setItem('satima-reporting-period',JSON.stringify({period:'custom',from,to}));if(typeof document!=='undefined')document.dispatchEvent(new CustomEvent('satima:business-month',{detail:{month}}));};
+ async function initializePeriod(api,storageKey,reporting){
+  if(sessionStorage.getItem('satima-business-range')||sessionStorage.getItem(storageKey))return;
+  const data=await api('/home');if(!data.range)return;
+  reporting.set(data.range.from,data.range.to);
+ }
+ function syncPeriod(reporting,month){if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month||''))return;const [year,m]=month.split('-').map(Number);reporting.set(month+'-01',new Date(Date.UTC(year,m,0)).toISOString().slice(0,10));}
  const groups={
   collection:{title:'Historical Milk Collection',description:'Source-reported farmer supply · separate from recorded milk collections.',keys:['farmers_milk_supply_liters'],trend:'farmers_milk_supply_liters'},
   processing:{title:'Historical Milk Processing',description:'Source-reported pasteurization figures · these are not recorded processing-batch output.',keys:['available_for_pasteurization_liters','pstd_inc_cf_reported_total_liters'],trend:'available_for_pasteurization_liters'},
@@ -42,15 +52,15 @@
  }
  function mountModule(host,api,scope,admin,returnsHost){
   if(!host||!groups[scope])return;
-  const ui=selector(host);let request=0;
+  const ui=selector(host);let request=0,availableMonths=[];
   async function load(month){const current=++request;ui.status.textContent='Loading historical performance…';try{
    const data=await api('/milk-performance'+(month?'?month='+encodeURIComponent(month):''));if(current!==request||!host.isConnected)return;
-   ui.select.innerHTML=data.months.map(item=>`<option value="${item.year}-${String(item.month).padStart(2,'0')}">${esc(item.label)}</option>`).join('');
+   availableMonths=data.months.map(item=>`${item.year}-${String(item.month).padStart(2,'0')}`);ui.select.innerHTML=data.months.map(item=>`<option value="${item.year}-${String(item.month).padStart(2,'0')}">${esc(item.label)}</option>`).join('');
    if(!data.selected){ui.status.textContent='No historical performance has been imported yet.';ui.results.innerHTML='';ui.select.disabled=true;if(returnsHost)returnsHost.innerHTML='<h2>Returns & Inventory</h2><p class="muted">No historical performance has been imported yet.</p>';return;}
    const active=selectedKey(data);ui.select.value=active;sessionStorage.setItem(storageKey,active);ui.status.textContent='';ui.results.innerHTML=section(data,scope,admin);
    if(returnsHost)returnsHost.innerHTML=section(data,'returns',admin);
   }catch(error){if(current!==request||!host.isConnected)return;ui.status.textContent=error.message||'Historical performance could not be loaded.';ui.results.innerHTML='';if(returnsHost)returnsHost.innerHTML='<h2>Returns & Inventory</h2><p class="error">Historical figures could not be loaded.</p>';}}
-  ui.select.onchange=()=>load(ui.select.value);load(sessionStorage.getItem(storageKey)).catch(()=>{});
+  ui.select.onchange=()=>{syncMonth(ui.select.value);load(ui.select.value);};if(typeof document!=='undefined')document.addEventListener('satima:reporting-range',event=>{if(!host.isConnected)return;const {from,to}=event.detail,month=from?.slice(0,7),[year,m]=month?.split('-').map(Number)||[];if(from===month+'-01'&&to===new Date(Date.UTC(year,m,0)).toISOString().slice(0,10)&&availableMonths.includes(month))load(month);});load(sessionStorage.getItem(storageKey)).catch(()=>{});
  }
  function mountHome(host,api,admin){
   if(!host)return;const ui=selector(host),base=location.pathname.startsWith('/operations')?'/operations':'';let request=0;
@@ -61,7 +71,7 @@
    ui.select.value=selectedKey(data);sessionStorage.setItem(storageKey,ui.select.value);ui.status.textContent='';
    ui.results.innerHTML=`<div class="performance-home-grid">${[['Milk Collection','farmers_milk_supply_liters','milk-collection'],['Milk Processing','available_for_pasteurization_liters','milk-processing'],['Milk Distribution','total_milk_out_liters','milk-distribution']].map(([label,key,path])=>`<a class="performance-home-link" href="${base}/${path}"><span>${label}</span><strong>${esc(total(data,key))}</strong><small>${esc(data.selected.label)} · source-reported</small><b>View weekly figures →</b></a>`).join('')}</div><p class="muted performance-note">Historical workbook totals are separate from live operational records and the homepage reporting-period filter.</p>${warning(data,admin,[])}`;
   }catch(error){if(current!==request||!host.isConnected)return;ui.status.textContent=error.message||'Historical performance could not be loaded.';ui.results.innerHTML='';}}
-  ui.select.onchange=()=>load(ui.select.value);load(sessionStorage.getItem(storageKey)).catch(()=>{});
+  ui.select.onchange=()=>{syncMonth(ui.select.value);load(ui.select.value);};load(sessionStorage.getItem(storageKey)).catch(()=>{});
  }
- window.milkPerformance={mount:mountHome,mountHome,mountModule};
+ window.milkPerformance={mount:mountHome,mountHome,mountModule,businessValue,businessShown,weeklyBars,initializePeriod,syncPeriod};
 })();
