@@ -44,8 +44,8 @@ test('repeat imports skip identical weeks and corrected values require a revisio
 test('homepage sections and KPI groups consume business actuals in both responsive portal shells',()=>{
  const home=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8');
  const css=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
- const sections=['Milk Supply Chain','At a Glance','Operational Figures','Milk Volume Overview','Distribution Destinations','Operational Attention'];
- assert.deepEqual([...sections].sort((a,b)=>home.indexOf(a)-home.indexOf(b)),sections);
+ const sections=['milk-supply-chain-title','at-a-glance-title','operational-figures-title','milk-volume-overview-title','distribution-destinations-title','operational-attention-title'];
+ assert.deepEqual([...sections].sort((a,b)=>home.indexOf(`aria-labelledby="${a}"`)-home.indexOf(`aria-labelledby="${b}"`)),sections);
  assert.match(home,/overview-directory-kpis/);assert.match(home,/overview-operational-kpis/);
  assert.match(home,/businessCard\('Milk Collected','farmers_milk_supply_liters'/);
  assert.match(home,/businessCard\('Milk Available for Pasteurization','available_for_pasteurization_liters'/);
@@ -68,9 +68,10 @@ test('overview keeps directory counts independent and renders four source-mapped
  const root={innerHTML:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector);},querySelectorAll(selector){if(selector==='.overview-custom')return ['from','to','apply'].map((_,i)=>{const key=`custom-${i}`;if(!nodes.has(key))nodes.set(key,element());return nodes.get(key);});return [];}};
  const storage={getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)};
  const browser={satimaDates:{format:value=>String(value).split('-').reverse().join('/'),today:()=>"2026-09-30",refresh(){}},milkPerformance:{businessValue:(business,key)=>business.source==='historical'?business.report.totals[key]?.value??null:null,businessShown:(business,key)=>{const value=business.report.totals[key]?.value;return value===null||value===undefined?'Not reported':`${value} L`;}}};
- const historical={source:'historical',month:'2026-09',report:{selected:{label:'September 2026'},records:[{week_number:1,farmers_milk_supply_liters:'10',available_for_pasteurization_liters:'8'},{week_number:2,farmers_milk_supply_liters:'12',available_for_pasteurization_liters:null}],totals:{farmers_milk_supply_liters:{value:'22'},available_for_pasteurization_liters:{value:'8'},pstd_inc_cf_reported_total_liters:{value:null},total_milk_out_liters:{value:'20'},milk_out_stores_liters:{value:'13'},milk_out_homes_liters:{value:'7'},returns_liters:{value:'1'}}}};
+ const report={months:[{year:2026,month:9,label:'September 2026',weeks:2}],selected:{year:2026,month:9,label:'September 2026'},records:[{week_number:1,farmers_milk_supply_liters:'10',available_for_pasteurization_liters:'8'},{week_number:2,farmers_milk_supply_liters:'12',available_for_pasteurization_liters:null}],totals:{farmers_milk_supply_liters:{value:'22'},available_for_pasteurization_liters:{value:'8'},pstd_inc_cf_reported_total_liters:{value:null},total_milk_out_liters:{value:'20'},milk_out_stores_liters:{value:'13'},milk_out_homes_liters:{value:'7'},returns_liters:{value:'1'}}};
+ const historical={source:'historical',month:'2026-09',report};
  const makeData=business=>({range:{period:business.source==='historical'?'custom':'week',from:business.source==='historical'?'2026-09-01':'2026-10-26',to:business.source==='historical'?'2026-09-30':'2026-11-01'},network:{farmers:89,customers:40,distributors:4,stores:36},operations:{collection_records:0,collected_liters:'0',quality_records:0,accepted_liters:'0',rejected_liters:'0',batch_records:0,processed_liters:'0',dispatched_liters:'0',dispatch_records:0,customer_liters:'0',store_liters:'0',pending_quality:0,rejected_checks:0,accepted_unallocated_liters:'0',draft_distributions:0},trend:[],business,note:'Stages have separate sources.'});
- const api=async path=>{calls.push(path);return makeData(path.includes('period=week')?{source:'operations',reason:'Historical weekly data has no verified dates.'}:historical);};
+ const api=async path=>{calls.push(path);if(path.startsWith('/milk-performance'))return report;return makeData(path.includes('period=week')?{source:'operations',reason:'Historical weekly data has no verified dates.'}:historical);};
  const context={window:browser,document:{querySelector:()=>root},sessionStorage:storage,URLSearchParams,setInterval(){},console};runInNewContext(source,context);
  browser.homeSupport.mount(api,false,'home');await new Promise(resolve=>setImmediate(resolve));
  let html=root.querySelector('#overview-data').innerHTML;
@@ -92,6 +93,34 @@ test('overview keeps directory counts independent and renders four source-mapped
  browser.homeSupport.mount(api,true,'home');await new Promise(resolve=>setImmediate(resolve));
  assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/farmers"/);
  assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/distributors\/type\/store"/);
+});
+
+test('homepage renders independent chronological historical charts for every available month',async()=>{
+ const source=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8'),nodes=new Map();
+ const element=()=>({innerHTML:'',textContent:'',value:'',hidden:false,disabled:false,addEventListener(_type,fn){this.listener=fn;}});
+ const root={innerHTML:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector);},querySelectorAll(){return [];}};
+ const months=[5,6,7,8,9].map(month=>({year:2026,month,label:['','January','February','March','April','May','June','July','August','September'][month]+' 2026',weeks:month===7||month===9?5:4}));
+ const makeReport=month=>{const item=months.find(x=>x.month===month),records=Array.from({length:item.weeks},(_,i)=>({week_number:i+1,farmers_milk_supply_liters:String(month*100+i+1),available_for_pasteurization_liters:String(month*80+i+1)}));const sum=key=>records.reduce((total,week)=>total+Number(week[key]),0);return {months:[...months].reverse(),selected:{year:2026,month,label:item.label,weeks:item.weeks},records,totals:{farmers_milk_supply_liters:{value:String(sum('farmers_milk_supply_liters'))},available_for_pasteurization_liters:{value:String(sum('available_for_pasteurization_liters'))},milk_out_stores_liters:{value:String(month*30)},milk_out_homes_liters:{value:String(month*20)}}};};
+ const reports=new Map(months.map(item=>[item.month,makeReport(item.month)]));
+ const opsBusiness={source:'operations',month:null,report:null,reason:'Historical weeks are separate from the selected operational range.'};
+ const home={range:{period:'month',from:'2026-11-01',to:'2026-11-02'},network:{farmers:1,customers:2,distributors:3,stores:4},operations:{collection_records:0,collected_liters:'0',quality_records:0,accepted_liters:'0',rejected_liters:'0',batch_records:0,processed_liters:'0',dispatched_liters:'0',dispatch_records:0,customer_liters:'0',store_liters:'0',pending_quality:0,rejected_checks:0,accepted_unallocated_liters:'0',draft_distributions:0},trend:[],business:opsBusiness,note:'Independent data sources.'};
+ const api=async path=>{if(path.startsWith('/home'))return home;if(path==='/milk-performance')return reports.get(9);const month=Number(path.match(/2026-(\d{2})/)?.[1]);return reports.get(month);};
+ const browser={satimaDates:{format:value=>String(value).split('-').reverse().join('/'),today:()=>"2026-11-02",refresh(){}},milkPerformance:{businessValue:()=>null,businessShown:()=>"Not reported"}};
+ const context={window:browser,document:{querySelector:()=>root},sessionStorage:{getItem:()=>null,setItem(){}},URLSearchParams,setInterval(){},console};runInNewContext(source,context);browser.homeSupport.mount(api,false,'home');
+ await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));
+ const html=root.querySelector('#overview-data').innerHTML,volume=html.slice(html.indexOf('id="milk-volume-overview-title"'),html.indexOf('id="distribution-destinations-title"')),destinations=html.slice(html.indexOf('id="distribution-destinations-title"'),html.indexOf('id="operational-attention-title"'));
+ const expected=months.map(item=>item.label);
+ assert.deepEqual(expected.map(label=>volume.indexOf(`${label} — Milk Volume Overview`)).every((pos,index,positions)=>pos>=0&&(index===0||positions[index-1]<pos)),true);
+ assert.deepEqual(expected.map(label=>destinations.indexOf(`${label} — Distribution Destinations`)).every((pos,index,positions)=>pos>=0&&(index===0||positions[index-1]<pos)),true);
+ assert.equal((volume.match(/class="overview-volume-chart"/g)||[]).length,5);
+ assert.equal((destinations.match(/class="overview-destination-bars"/g)||[]).length,5);
+ assert.equal((volume.match(/class="overview-month-card"/g)||[]).length,5);
+ assert.equal((destinations.match(/class="overview-month-card"/g)||[]).length,5);
+ assert.match(volume,/Week 5/);
+ assert.match(volume,/Milk Collected: <strong>2,010 L<\/strong>/);
+ assert.match(volume,/Milk Collected: <strong>4,515 L<\/strong>/);
+ assert.match(destinations,/150 L/);assert.match(destinations,/160 L/);assert.match(destinations,/Stores/);assert.match(destinations,/Customers/);
+ assert.doesNotMatch(destinations,/Distributors/);
 });
 
 test('historical sections use the shared monthly API without mixing operational metrics',async()=>{
