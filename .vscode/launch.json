@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "CMS (local Docker)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "make start"
+    },
+    {
+      "name": "Node tests (local DB)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "python3 app/scripts/local-env.py npm test --prefix app"
+    }
+  ]
+}
