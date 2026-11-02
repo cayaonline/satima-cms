@@ -6,6 +6,7 @@ const adminHtml = await readFile(new URL('../public/index.html', import.meta.url
 const operationsHtml = await readFile(new URL('../public/operations.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
 const js = await readFile(new URL('../public/navigation.js', import.meta.url), 'utf8');
+const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
 const expected = ['home', 'farmers', 'customers', 'distributors', 'milk', 'processing', 'distribution', 'support'];
 
 function navLinks(html) {
@@ -50,4 +51,8 @@ test('responsive navigation includes mobile drawer, desktop collapse, reduced mo
   assert.match(js, /aria-modal/);
   assert.match(js, /localStorage/);
   assert.match(js, /main\.inert = true/);
+});
+
+test('server serves the shared navigation controller as a public static asset', () => {
+  assert.match(server, /'\/navigation\.js':\['navigation\.js','text\/javascript'\]/);
 });
