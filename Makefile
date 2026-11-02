@@ -31,3 +31,21 @@ setup:
 doctor:
 	@command -v python3 >/dev/null 2>&1 || { echo 'Python 3 is required. Install Python 3, then retry.' >&2; exit 1; }
 	@python3 scripts/doctor.py
+
+# Run this checkout beside an older local installation without reusing its database volume.
+ISOLATED_ENV = COMPOSE_PROJECT_NAME=satima-cms-vscode POSTGRES_PORT=55432 CMS_PORT=3001
+.PHONY: start-isolated down-isolated status-isolated logs-isolated app-test-isolated test-isolated seed-isolated
+start-isolated:
+	@$(ISOLATED_ENV) $(MAKE) start
+down-isolated:
+	@$(ISOLATED_ENV) $(MAKE) down
+status-isolated:
+	@$(ISOLATED_ENV) $(MAKE) status
+logs-isolated:
+	@$(ISOLATED_ENV) $(MAKE) logs
+app-test-isolated:
+	@$(ISOLATED_ENV) $(MAKE) app-test
+test-isolated:
+	@$(ISOLATED_ENV) $(MAKE) test
+seed-isolated:
+	@$(ISOLATED_ENV) $(MAKE) seed

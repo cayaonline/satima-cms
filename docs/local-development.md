@@ -29,9 +29,31 @@ Run repository commands only after changing into the clone. Confirm with `pwd` a
 
 If `make setup` is run on a fresh checkout, it creates credentials, not data. Existing Docker volumes are preserved. Do not remove the volume or run `make reset-db` as routine setup.
 
+### Run beside an existing local installation
+
+If this Mac already has an older Satima database, start this checkout in its own Compose project and volume:
+
+```sh
+make start-isolated
+```
+
+This uses project `satima-cms-vscode`, a separate `postgres_data` volume, database port 55432, and CMS port 3001. The existing project, volume, and service on port 3000 stay in place. The new database is empty until you apply fictional fixtures with `make seed`.
+
+Use the matching commands so tests and shutdown target the isolated stack:
+
+```sh
+make status-isolated
+make app-test-isolated
+make test-isolated
+docker compose -p satima-cms-vscode logs -f app
+make down-isolated
+```
+
+`make down-isolated` stops this checkout and preserves its new volume. The VS Code launch configurations use this isolated project automatically. Do not run `make reset-db` to resolve a migration conflict in another local installation.
+
 ## Open in VS Code
 
-From the repository root, run `code .` or choose **File → Open Folder**. The checked-in workspace settings recommend Docker and Python extensions, hide generated folders, and provide launch entries for the Docker CMS and local Node tests. The `CMS (local Docker)` launch entry is equivalent to `make start`; start Docker Desktop first.
+From the repository root, run `code .` or choose **File → Open Folder**. The checked-in workspace settings recommend Docker and Python extensions, hide generated folders, and provide launch entries for the isolated Docker CMS and its local Node tests. The `CMS (isolated local Docker)` launch entry is equivalent to `make start-isolated`; start Docker Desktop first.
 
 ## Start, inspect and stop
 

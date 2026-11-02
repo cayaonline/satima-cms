@@ -15,5 +15,7 @@ fi
 if ! command -v python3 >/dev/null 2>&1; then
  echo 'Python 3 is required for migrations and local scripts. Install Python 3, then retry.' >&2; exit 1
 fi
-compose() { "$DOCKER" compose --project-directory "$ROOT" --env-file "$ROOT/.env" "$@"; }
+COMPOSE_PROJECT_ARGS=()
+if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then COMPOSE_PROJECT_ARGS=(-p "$COMPOSE_PROJECT_NAME"); fi
+compose() { "$DOCKER" compose "${COMPOSE_PROJECT_ARGS[@]}" --project-directory "$ROOT" --env-file "$ROOT/.env" "$@"; }
 psql_db() { compose exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }

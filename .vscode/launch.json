@@ -2,16 +2,26 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "CMS (local Docker)",
+      "name": "CMS (isolated local Docker)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "make start"
+      "command": "make start-isolated",
+      "env": {
+        "COMPOSE_PROJECT_NAME": "satima-cms-vscode",
+        "POSTGRES_PORT": "55432",
+        "CMS_PORT": "3001"
+      }
     },
     {
-      "name": "Node tests (local DB)",
+      "name": "Node tests (isolated local DB)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "python3 app/scripts/local-env.py npm test --prefix app"
+      "command": "make app-test-isolated",
+      "env": {
+        "COMPOSE_PROJECT_NAME": "satima-cms-vscode",
+        "POSTGRES_PORT": "55432",
+        "CMS_PORT": "3001"
+      }
     }
   ]
 }
