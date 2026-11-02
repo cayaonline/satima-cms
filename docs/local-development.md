@@ -11,16 +11,19 @@ This guide runs the existing Satima CMS and PostgreSQL services locally. It does
 - Node.js 24.21.0 and npm 11 for local Node tests; the application itself runs in Docker
 - Visual Studio Code (optional)
 
-The application container uses the pinned Node.js 24.21.0 image. `.nvmrc` pins the same version for local tools. On a Mac with `nvm`, run `nvm install` and `nvm use` in the repository. Check prerequisites with `make doctor`.
+The application container uses the pinned Node.js 24.21.0 image. `.nvmrc` pins the same version for local tools. If `nvm` is not installed, follow the [official nvm installation instructions](https://github.com/nvnm-sh/nvm#installing-and-updating). Open a fresh Terminal afterward and verify `command -v nvm` returns `nvm`; if needed, run `source ~/.zshrc`. In the repository, run `nvm install` and `nvm use`; these read `.nvmrc`. Check prerequisites with `make doctor`.
 
 ## First-time setup
 
 ```sh
-git clone https://github.com/cayaonline/satima-cms.git
-cd satima-cms
+mkdir -p ~/Developer
+git clone https://github.com/cayaonline/satima-cms.git ~/Developer/satima-cms
+cd ~/Developer/satima-cms
 make setup
 make doctor
 ```
+
+Run repository commands only after changing into the clone. Confirm with `pwd` and `ls Makefile app/package-lock.json`; running `make` or `npm ci --prefix app` from `~` will not find the project files.
 
 `make setup` creates a private `.env` with random machine-local passwords only if it does not already exist. It never overwrites existing credentials. Keep `.env` on this computer; it is ignored by Git. If the file already exists, setup preserves it, and `make doctor` checks that its file permissions are private without displaying values. Set them to owner-only with `chmod 600 .env` if needed.
 

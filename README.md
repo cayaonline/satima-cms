@@ -6,7 +6,15 @@ Satima CMS is a Node.js application with a PostgreSQL 18 database and browser-ba
 
 See [Local development](docs/local-development.md) for Mac requirements, first-time setup, VS Code, tests, debugging, local data, backups, and troubleshooting.
 
-Quick start from a clone:
+Clone the project and enter its directory first. These commands must run from the repository root, where `Makefile`, `docker-compose.yml`, and `app/package-lock.json` are present:
+
+```sh
+mkdir -p ~/Developer
+git clone https://github.com/cayaonline/satima-cms.git ~/Developer/satima-cms
+cd ~/Developer/satima-cms
+```
+
+Then run:
 
 ```sh
 make setup       # creates .env only when absent; existing credentials are preserved
