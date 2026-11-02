@@ -41,16 +41,57 @@ test('repeat imports skip identical weeks and corrected values require a revisio
  assert.equal(planImport([{...week,values:{farmers_milk_supply_liters:'6'}}],[old])[0].action,'revise');
 });
 
-test('original supply chain and KPI sections consume business actuals in both responsive portal shells',()=>{
+test('homepage sections and KPI groups consume business actuals in both responsive portal shells',()=>{
  const home=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8');
  const css=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
- assert.ok(home.indexOf('At a Glance')<home.indexOf('Milk Supply Chain'));
- assert.ok(home.indexOf('Milk Supply Chain')<home.indexOf('Milk Volume Overview'));
+ const sections=['Milk Supply Chain','At a Glance','Operational Figures','Milk Volume Overview','Distribution Destinations','Operational Attention'];
+ assert.deepEqual([...sections].sort((a,b)=>home.indexOf(a)-home.indexOf(b)),sections);
+ assert.match(home,/overview-directory-kpis/);assert.match(home,/overview-operational-kpis/);
  assert.match(home,/businessCard\('Milk Collected','farmers_milk_supply_liters'/);
+ assert.match(home,/businessCard\('Milk Available for Pasteurization','available_for_pasteurization_liters'/);
+ assert.match(home,/businessCard\('Pasteurized Including Carry Forward','pstd_inc_cf_reported_total_liters'/);
  assert.match(home,/businessCard\('Total Milk Out','total_milk_out_liters'/);
+ assert.doesNotMatch(home,/card\('Milk Accepted'/);assert.doesNotMatch(home,/card\('Milk Rejected'/);
+ assert.match(home,/overview-chart-bar-collected/);assert.match(home,/overview-chart-bar-second/);
+ assert.match(home,/milk_out_stores_liters/);assert.match(home,/milk_out_homes_liters/);
+ assert.doesNotMatch(home,/overview-split/);
  for(const shell of ['index.html','operations.html'])assert.match(readFileSync(new URL('../public/'+shell,import.meta.url),'utf8'),/milk-performance\.js/);
  assert.match(css,/\.performance-table-wrap\{[^}]*overflow-x:auto/);
+ assert.match(css,/\.overview-volume-chart\{display:block;width:100%;height:auto/);
+ assert.match(css,/\.overview-directory-kpis,.overview-operational-kpis\{grid-template-columns:repeat\(4/);
  assert.match(css,/@media\(max-width:600px\)\{\.performance-heading/);
+});
+
+test('overview keeps directory counts independent and renders four source-mapped operational KPIs',async()=>{
+ const source=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8'),nodes=new Map(),saved=new Map(),calls=[];
+ const element=()=>({innerHTML:'',textContent:'',value:'',hidden:false,disabled:false,addEventListener(_type,fn){this.listener=fn;}});
+ const root={innerHTML:'',querySelector(selector){if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector);},querySelectorAll(selector){if(selector==='.overview-custom')return ['from','to','apply'].map((_,i)=>{const key=`custom-${i}`;if(!nodes.has(key))nodes.set(key,element());return nodes.get(key);});return [];}};
+ const storage={getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)};
+ const browser={satimaDates:{format:value=>String(value).split('-').reverse().join('/'),today:()=>"2026-09-30",refresh(){}},milkPerformance:{businessValue:(business,key)=>business.source==='historical'?business.report.totals[key]?.value??null:null,businessShown:(business,key)=>{const value=business.report.totals[key]?.value;return value===null||value===undefined?'Not reported':`${value} L`;}}};
+ const historical={source:'historical',month:'2026-09',report:{selected:{label:'September 2026'},records:[{week_number:1,farmers_milk_supply_liters:'10',available_for_pasteurization_liters:'8'},{week_number:2,farmers_milk_supply_liters:'12',available_for_pasteurization_liters:null}],totals:{farmers_milk_supply_liters:{value:'22'},available_for_pasteurization_liters:{value:'8'},pstd_inc_cf_reported_total_liters:{value:null},total_milk_out_liters:{value:'20'},milk_out_stores_liters:{value:'13'},milk_out_homes_liters:{value:'7'},returns_liters:{value:'1'}}}};
+ const makeData=business=>({range:{period:business.source==='historical'?'custom':'week',from:business.source==='historical'?'2026-09-01':'2026-10-26',to:business.source==='historical'?'2026-09-30':'2026-11-01'},network:{farmers:89,customers:40,distributors:4,stores:36},operations:{collection_records:0,collected_liters:'0',quality_records:0,accepted_liters:'0',rejected_liters:'0',batch_records:0,processed_liters:'0',dispatched_liters:'0',dispatch_records:0,customer_liters:'0',store_liters:'0',pending_quality:0,rejected_checks:0,accepted_unallocated_liters:'0',draft_distributions:0},trend:[],business,note:'Stages have separate sources.'});
+ const api=async path=>{calls.push(path);return makeData(path.includes('period=week')?{source:'operations',reason:'Historical weekly data has no verified dates.'}:historical);};
+ const context={window:browser,document:{querySelector:()=>root},sessionStorage:storage,URLSearchParams,setInterval(){},console};runInNewContext(source,context);
+ browser.homeSupport.mount(api,false,'home');await new Promise(resolve=>setImmediate(resolve));
+ let html=root.querySelector('#overview-data').innerHTML;
+ const directoryStart=html.indexOf('id="at-a-glance-title"'),directoryEnd=html.indexOf('</section>',directoryStart),directory=html.slice(directoryStart,directoryEnd);
+ const figuresStart=html.indexOf('id="operational-figures-title"'),figuresEnd=html.indexOf('</section>',figuresStart),figures=html.slice(figuresStart,figuresEnd);
+ assert.equal((directory.match(/class="overview-card"/g)||[]).length,4);
+ assert.deepEqual(['Farmers','Customers','Distributors','Stores'].map(label=>directory.indexOf(`<span>${label}</span>`)>-1),[true,true,true,true]);
+ assert.equal((figures.match(/class="overview-card"/g)||[]).length,4);
+ for(const label of ['Milk Collected','Milk Available for Pasteurization','Pasteurized Including Carry Forward','Total Milk Out'])assert.ok(figures.includes(`<span>${label}</span>`));
+ assert.match(figures,/Not reported/);assert.match(figures,/Reporting Period Selector/);
+ assert.ok(html.indexOf('id="milk-supply-chain-title"')<html.indexOf('id="at-a-glance-title"'));
+ assert.ok(html.indexOf('id="operational-attention-title"')>html.indexOf('id="distribution-destinations-title"'));
+ assert.match(html,/Week 2[\s\S]*?Not reported/);assert.doesNotMatch(html,/Milk Accepted<\/span>/);assert.doesNotMatch(html,/Milk Rejected<\/span>/);
+ const period=nodes.get('#overview-period');period.value='week';period.onchange();await new Promise(resolve=>setImmediate(resolve));html=root.querySelector('#overview-data').innerHTML;
+ const afterStart=html.indexOf('id="at-a-glance-title"'),afterEnd=html.indexOf('</section>',afterStart),after=html.slice(afterStart,afterEnd);
+ assert.equal((after.match(/class="overview-card"/g)||[]).length,4);
+ for(const [label,count] of [['Farmers',89],['Customers',40],['Distributors',4],['Stores',36]])assert.ok(after.includes(`<span>${label}</span><strong>${count}</strong>`));
+ assert.ok(calls.some(path=>path.includes('period=week')));
+ browser.homeSupport.mount(api,true,'home');await new Promise(resolve=>setImmediate(resolve));
+ assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/farmers"/);
+ assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/distributors\/type\/store"/);
 });
 
 test('historical sections use the shared monthly API without mixing operational metrics',async()=>{
