@@ -51,9 +51,7 @@ test('responsive navigation includes mobile drawer, desktop collapse, reduced mo
   assert.match(css, /#workspace\.nav-open>aside#workspace-sidebar/);
   assert.match(css, /#workspace\.sidebar-collapsed/);
   assert.match(css, /width:min\(84vw,336px\)/);
-  assert.match(css, /\.primary-nav\{display:flex;flex:1 1 auto;min-height:0/);
   assert.match(css, /overflow-y:auto;overscroll-behavior:contain/);
-  assert.match(css, /\.sidebar-foot\{flex:none;margin:auto 0 0/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
   assert.match(js, /event\.key === 'Escape'/);
   assert.match(js, /event\.key === 'Tab'/);

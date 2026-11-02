@@ -68,6 +68,10 @@
   toggle.addEventListener('click', () => workspace.classList.contains('nav-open') ? closeDrawer() : openDrawer());
   closeButton?.addEventListener('click', () => closeDrawer());
   backdrop?.addEventListener('click', () => closeDrawer());
+  // Admin logout hides the workspace without reloading the page. Release its modal state.
+  document.getElementById('logout')?.addEventListener('click', () => {
+    if (workspace.classList.contains('nav-open')) closeDrawer({ restoreFocus: false });
+  });
   collapse?.addEventListener('click', () => {
     const next = !workspace.classList.contains('sidebar-collapsed');
     setCollapsed(next);
