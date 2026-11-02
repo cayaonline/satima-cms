@@ -38,6 +38,11 @@ test('both shells expose grouped navigation, current page breadcrumb, and labele
     assert.match(html, /id="breadcrumb"/);
     assert.match(html, /id="logout"/);
     assert.match(html, /src="\/navigation\.js"/);
+    assert.match(html, /class="sidebar-brand"[\s\S]*?class="drawer-close"/);
+    assert.match(html, /class="sidebar-identity"><span class="workspace-role">(?:Admin Panel|Operations Portal)<\/span>/);
+    assert.match(html, /class="sidebar-foot"><button id="logout"/);
+    const sidebar = html.match(/<aside id="workspace-sidebar"[\s\S]*?<\/aside>/)?.[0] || '';
+    assert.doesNotMatch(sidebar, /KRA verification access|Administration workspace|Morning Dew Operations<\/small>/);
   }
 });
 
@@ -45,6 +50,10 @@ test('responsive navigation includes mobile drawer, desktop collapse, reduced mo
   assert.match(css, /@media\(max-width:1100px\)/);
   assert.match(css, /#workspace\.nav-open>aside#workspace-sidebar/);
   assert.match(css, /#workspace\.sidebar-collapsed/);
+  assert.match(css, /width:min\(84vw,336px\)/);
+  assert.match(css, /\.primary-nav\{display:flex;flex:1 1 auto;min-height:0/);
+  assert.match(css, /overflow-y:auto;overscroll-behavior:contain/);
+  assert.match(css, /\.sidebar-foot\{flex:none;margin:auto 0 0/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
   assert.match(js, /event\.key === 'Escape'/);
   assert.match(js, /event\.key === 'Tab'/);

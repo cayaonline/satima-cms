@@ -15,7 +15,6 @@ const milkOperationRoute=window.milkOperations.route(location.pathname,'/operati
 const kraBase='/operations/kra-verification',kraRoute=window.kraUI.route(location.pathname,kraBase);
 let page=1,requestNumber=0,debounce;
 let sensitiveRegistration=false;
-if(!stakeholderRoute&&!milkRoute&&!milkOperationRoute)document.querySelector('.workspace-role').textContent='Operations Portal · KRA verification access';
 
 if(overviewRoute||supportRoute){$('#farmer-content').hidden=true;$('#home-support-content').hidden=false;$('#breadcrumb').textContent=overviewRoute?'Home':'Contact Support';document.querySelectorAll('[data-nav]').forEach(link=>{const active=link.dataset.nav===(overviewRoute?'home':'support');link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});}
 if(!overviewRoute&&!supportRoute&&!stakeholderRoute&&!milkRoute&&!milkOperationRoute){const link=document.querySelector('[data-nav="farmers"]');link.classList.add('active');link.setAttribute('aria-current','page');}
