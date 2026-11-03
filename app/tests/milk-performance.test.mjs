@@ -44,7 +44,7 @@ test('repeat imports skip identical weeks and corrected values require a revisio
 test('homepage sections and KPI groups consume business actuals in both responsive portal shells',()=>{
  const home=readFileSync(new URL('../public/home-support.js',import.meta.url),'utf8');
  const css=readFileSync(new URL('../public/style.css',import.meta.url),'utf8');
- const sections=['milk-supply-chain-title','at-a-glance-title','operational-figures-title','milk-volume-overview-title','distribution-destinations-title','operational-attention-title'];
+ const sections=['at-a-glance-title','milk-volume-overview-title','distribution-destinations-title','operational-figures-title','milk-supply-chain-title','operational-attention-title'];
  assert.deepEqual([...sections].sort((a,b)=>home.indexOf(`aria-labelledby="${a}"`)-home.indexOf(`aria-labelledby="${b}"`)),sections);
  assert.match(home,/overview-directory-kpis/);assert.match(home,/overview-operational-kpis/);
  assert.match(home,/businessCard\('Milk Collected','farmers_milk_supply_liters'/);
@@ -82,7 +82,9 @@ test('overview keeps directory counts independent and renders four source-mapped
  assert.equal((figures.match(/class="overview-card"/g)||[]).length,4);
  for(const label of ['Milk Collected','Milk Available for Pasteurization','Pasteurized Including Carry Forward','Total Milk Out'])assert.ok(figures.includes(`<span>${label}</span>`));
  assert.match(figures,/Not reported/);assert.match(figures,/Reporting Period Selector/);
- assert.ok(html.indexOf('id="milk-supply-chain-title"')<html.indexOf('id="at-a-glance-title"'));
+ const expectedOrder=['at-a-glance-title','milk-volume-overview-title','distribution-destinations-title','operational-figures-title','milk-supply-chain-title','operational-attention-title'];
+ const sectionOrder=html=>[...html.matchAll(/<section class="overview-section" aria-labelledby="([^"]+)"/g)].map(match=>match[1]);
+ assert.deepEqual(sectionOrder(html),expectedOrder);
  assert.ok(html.indexOf('id="operational-attention-title"')>html.indexOf('id="distribution-destinations-title"'));
  assert.match(html,/Week 2[\s\S]*?Not reported/);assert.doesNotMatch(html,/Milk Accepted<\/span>/);assert.doesNotMatch(html,/Milk Rejected<\/span>/);
  const period=nodes.get('#overview-period');period.value='week';period.onchange();await new Promise(resolve=>setImmediate(resolve));html=root.querySelector('#overview-data').innerHTML;
@@ -91,6 +93,7 @@ test('overview keeps directory counts independent and renders four source-mapped
  for(const [label,count] of [['Farmers',89],['Customers',40],['Distributors',4],['Stores',36]])assert.ok(after.includes(`<span>${label}</span><strong>${count}</strong>`));
  assert.ok(calls.some(path=>path.includes('period=week')));
  browser.homeSupport.mount(api,true,'home');await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(sectionOrder(root.querySelector('#overview-data').innerHTML),expectedOrder);
  assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/farmers"/);
  assert.match(root.querySelector('#overview-data').innerHTML,/href="\/operations\/distributors\/type\/store"/);
 });
@@ -108,7 +111,7 @@ test('homepage renders independent chronological historical charts for every ava
  const browser={satimaDates:{format:value=>String(value).split('-').reverse().join('/'),today:()=>"2026-11-02",refresh(){}},milkPerformance:{businessValue:()=>null,businessShown:()=>"Not reported"}};
  const context={window:browser,document:{querySelector:()=>root},sessionStorage:{getItem:()=>null,setItem(){}},URLSearchParams,setInterval(){},console};runInNewContext(source,context);browser.homeSupport.mount(api,false,'home');
  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));
- const html=root.querySelector('#overview-data').innerHTML,volume=html.slice(html.indexOf('id="milk-volume-overview-title"'),html.indexOf('id="distribution-destinations-title"')),destinations=html.slice(html.indexOf('id="distribution-destinations-title"'),html.indexOf('id="operational-attention-title"'));
+ const html=root.querySelector('#overview-data').innerHTML,volume=html.slice(html.indexOf('id="milk-volume-overview-title"'),html.indexOf('id="distribution-destinations-title"')),destinations=html.slice(html.indexOf('id="distribution-destinations-title"'),html.indexOf('id="operational-figures-title"'));
  const expected=months.map(item=>item.label);
  assert.deepEqual(expected.map(label=>volume.indexOf(`${label} — Milk Volume Overview`)).every((pos,index,positions)=>pos>=0&&(index===0||positions[index-1]<pos)),true);
  assert.deepEqual(expected.map(label=>destinations.indexOf(`${label} — Distribution Destinations`)).every((pos,index,positions)=>pos>=0&&(index===0||positions[index-1]<pos)),true);
