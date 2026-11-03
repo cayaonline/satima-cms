@@ -1,3 +1,6 @@
+import {homeSummary} from '../home.mjs';
+import {listCustomers} from '../customers.mjs';
+import {listDistributors} from '../distributors.mjs';
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {directoryQuery,listFarmers} from '../directory.mjs';
@@ -45,6 +48,18 @@ test('current supplier master drives both portals while historical farmers remai
    const directory=await list(c,params({q:'ISOLATED MASTER'}));
    assert.equal(directory.stats.total,2);assert.deepEqual(new Set(directory.farmers.map(f=>f.id)),new Set([current.id,awaiting.id]));
    assert.equal(directory.stats.categories['Satima Farmers'],1);assert.equal(directory.stats.categories.Others,0);
+  }
+  // Exercise the actual homepage and directory SQL against the same database snapshot.
+  // The uncategorized historical record above must count; the categorized historical one must not.
+  const admin=await listFarmers(c,params({})),operations=await listOperationsFarmers(c,params({}));
+  const customers=await listCustomers(c,params({})),distributors=await listDistributors(c,params({type:'distributor'})),stores=await listDistributors(c,params({type:'store'}));
+  const expected={farmers:admin.stats.total,customers:customers.pagination.total,distributors:distributors.pagination.total,stores:stores.pagination.total};
+  assert.equal(operations.stats.total,expected.farmers);
+  assert.equal(customers.total,expected.customers);
+  assert.equal(distributors.stats.distributors,expected.distributors);
+  assert.equal(distributors.stats.stores,expected.stores);
+  for(const selection of [{period:'custom',from:'2026-09-01',to:'2026-09-30'},{period:'today'}]){
+   assert.deepEqual((await homeSummary(c,params(selection))).network,expected,'master-data totals agree across directories and reporting periods');
   }
   assert.equal((await listFarmers(c,params({q:'ISOLATED MASTER',scope:'all'}))).stats.total,3);
   const awaitingList=await listFarmers(c,params({q:'ISOLATED MASTER',category:'unassigned'}));

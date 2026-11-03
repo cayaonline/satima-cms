@@ -1,3 +1,4 @@
+import {distributorCountsQuery} from './master-data.mjs';
 import {Problem} from './store.mjs';
 
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -15,7 +16,7 @@ export async function listDistributors(pool,params){
  if(parent){if(!uuid.test(parent))throw new Problem(400,'Invalid parent distributor.');values.push(parent);clauses.push(`d.parent_id=$${values.length}`);}
  const join='FROM distributors d LEFT JOIN distributors p ON p.id=d.parent_id',where=clauses.length?'WHERE '+clauses.join(' AND '):'';
  const {rows:[total]}=await pool.query(`SELECT count(*)::int AS count ${join} ${where}`,values);
- const {rows:[stats]}=await pool.query("SELECT count(*) FILTER (WHERE record_type='distributor')::int AS distributors,count(*) FILTER (WHERE record_type='store')::int AS stores,(SELECT count(*)::int FROM customers) AS customers FROM distributors");
+ const {rows:[stats]}=await pool.query(distributorCountsQuery);
  const {rows:[activity]}=await pool.query("SELECT count(*)::int AS records,coalesce(sum(d.quantity_liters) FILTER (WHERE d.status IN ('dispatched','delivered') AND d.recipient_type='distributor'),0)::numeric(16,6)::text AS store_liters,coalesce(sum(d.quantity_liters) FILTER (WHERE d.status IN ('dispatched','delivered') AND d.recipient_type='customer'),0)::numeric(16,6)::text AS customer_liters FROM milk_distributions d");
  const {rows}=await pool.query(`SELECT d.id,d.distributor_code,d.store_code,coalesce(d.store_code,d.distributor_code) AS public_code,d.name,d.record_type,d.parent_id,p.name AS parent_name,d.route_name,d.manager_name,d.phone_number,d.location,(SELECT count(*)::int FROM distributors child WHERE child.parent_id=d.id AND child.record_type='store') AS store_count ${join} ${where} ORDER BY ${sorts[sort]} ${direction} NULLS LAST,d.distributor_code ASC LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,size,(page-1)*size]);
  return {records:rows,stats:{...stats,...activity},pagination:{page,page_size:size,total:total.count,total_pages:Math.max(1,Math.ceil(total.count/size))}};

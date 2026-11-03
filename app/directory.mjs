@@ -1,3 +1,4 @@
+import {farmerRecordCondition,farmerVisibilityCondition} from './master-data.mjs';
 import {Problem,farmerCategories,farmerGenders} from './store.mjs';
 const sorts={customer_id:"substring(f.customer_id from 6)::numeric",full_name:'lower(f.full_name)',registration_date:'f.registration_date',date_of_birth:'f.date_of_birth',preferred_language:'f.preferred_language',status:'f.status::text',created_at:'f.created_at'};
 const statuses=['pending_verification','active','inactive','suspended'];
@@ -11,8 +12,8 @@ export function directoryQuery(params){
  if(!['registered','all'].includes(scope)||status&&!statuses.includes(status)||category&&!['unassigned',...farmerCategories].includes(category)||registration&&!['registered','not_registered','review_required','incomplete'].includes(registration)||gender&&!farmerGenders.includes(gender)||!['all','open','clear'].includes(review)||!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction))throw new Problem(400,'Invalid directory filter or sort');
  const q=(params.get('q')||'').trim();if(q.length>100)throw new Problem(400,'Search must be at most 100 characters');
  const values=[],conditions=[];const bind=v=>{values.push(v);return '$'+values.length;};
- if(scope!=='all')conditions.push('f.record_kind='+bind(scope));
- if(scope!=='all'&&review==='all')conditions.push("(f.master_list_status='current' OR f.category IS NULL)");
+ if(scope!=='all')conditions.push(farmerRecordCondition);
+ if(scope!=='all'&&review==='all')conditions.push(farmerVisibilityCondition);
  if(category)conditions.push(category==='unassigned'?'f.category IS NULL':'f.category='+bind(category));
  if(registration)conditions.push(registration==='incomplete'?"f.registration_status<>'registered'":'f.registration_status='+bind(registration));
  if(gender)conditions.push('f.gender='+bind(gender));
