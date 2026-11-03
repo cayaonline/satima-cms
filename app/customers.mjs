@@ -1,3 +1,4 @@
+import {customerCountQuery} from './master-data.mjs';
 import {Problem} from './store.mjs';
 
 export const customerCategories=['Current Customers','Lapsed Customers (Expected to Resume Soon)','Geographically Isolated','Dormant / Non-Responsive','Retired'];
@@ -16,7 +17,7 @@ export async function listCustomers(pool,params){
  if(category)clauses.push(category==='unassigned'?'category IS NULL':(values.push(category),`category=$${values.length}`));
  const size=30,where=clauses.length?'WHERE '+clauses.join(' AND '):'';
  const {rows:[count]}=await pool.query(`SELECT count(*)::int AS total FROM customers ${where}`,values);
- const {rows:[all]}=await pool.query('SELECT count(*)::int AS total FROM customers');
+ const {rows:[all]}=await pool.query(customerCountQuery);
  const {rows:groups}=await pool.query('SELECT category,count(*)::int AS total FROM customers GROUP BY category');
  const categories=Object.fromEntries(customerCategories.map(label=>[label,groups.find(row=>row.category===label)?.total||0]));
  const {rows}=await pool.query(`SELECT id,customer_id,full_name,physical_address,phone_number,gender,category FROM customers ${where} ORDER BY ${sorts[sort]} ${direction} NULLS LAST,substring(customer_id from 2)::bigint ASC LIMIT $${values.length+1} OFFSET $${values.length+2}`,[...values,size,(page-1)*size]);

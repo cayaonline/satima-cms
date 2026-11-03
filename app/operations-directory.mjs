@@ -1,3 +1,4 @@
+import {farmerDirectoryCondition} from './master-data.mjs';
 import {Problem,farmerCategories,farmerGenders} from './store.mjs';
 
 const sorts={
@@ -19,7 +20,7 @@ export function operationsDirectoryQuery(params){
  const q=(params.get('q')||'').trim();
  if(category&&!farmerCategories.includes(category)||filter&&!['registered','not_registered'].includes(filter)||gender&&!farmerGenders.includes(gender)||!Object.hasOwn(sorts,sort)||!['asc','desc'].includes(direction)||q.length>100)throw new Problem(400,'Invalid directory filter or sort.');
  const values=[],bind=value=>{values.push(value);return '$'+values.length;};
- const conditions=["f.record_kind='registered'","(f.master_list_status='current' OR f.category IS NULL)"];
+ const conditions=[farmerDirectoryCondition];
  if(category)conditions.push('f.category='+bind(category));
  if(filter)conditions.push(registration+'='+bind(filter));
  if(gender)conditions.push('f.gender='+bind(gender));
