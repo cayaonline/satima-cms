@@ -98,6 +98,8 @@ export async function detail(id){
  if(!f)throw new Problem(404,'Farmer not found.');
  const children={contacts:'farmer_contacts',payments:'farmer_payment_profiles',consents:'farmer_consents',verifications:'farmer_verifications',sources:'farmer_registration_sources',directory_sources:'farmer_directory_sources',issues:'farmer_data_issues',audit:'farmer_audit_events'};
  for(const [key,t] of Object.entries(children))f[key]=(await pool.query(`SELECT *${key==='issues'?',updated_at::text AS revision':''} FROM ${t} WHERE farmer_id=$1 ORDER BY ${['sources','directory_sources'].includes(key)?'imported_at':'created_at'} DESC,id DESC${key==='audit'?' LIMIT 30':''}`,[id])).rows;
+ f.supply_history=await pool.query(`SELECT supply_date::text,quantity_liters::text,source_category,original_value,match_status FROM farmer_supply_history WHERE farmer_id=$1 AND is_current ORDER BY supply_date DESC,id DESC LIMIT 100`,[id]).then(r=>r.rows);
+ f.supply_summary=await pool.query(`SELECT coalesce(sum(quantity_liters),0)::text AS total_liters,count(quantity_liters)::int AS records,min(supply_date) FILTER (WHERE quantity_liters IS NOT NULL)::text AS first_date,max(supply_date) FILTER (WHERE quantity_liters IS NOT NULL)::text AS latest_date FROM farmer_supply_history WHERE farmer_id=$1 AND is_current`,[id]).then(r=>r.rows[0]);
  return f;
 }
 

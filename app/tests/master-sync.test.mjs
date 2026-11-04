@@ -6,6 +6,7 @@ test('Kenyan phone forms normalize to one identity',()=>{
  assert.equal(normalizedPhone('0712 345 678'),'+254712345678');
  assert.equal(normalizedPhone('+254 712 345 678'),'+254712345678');
  assert.equal(normalizedPhone('0112 345 678'),'+254112345678');
+ assert.equal(normalizedPhone('712345678'),'+254712345678');
  assert.equal(normalizedPhone('unknown'),null);
 });
 test('Excel-style headers map to the existing customer fields without guessing extra columns',()=>{
