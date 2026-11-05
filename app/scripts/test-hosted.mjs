@@ -30,7 +30,7 @@ try{
  // Exercise migrations as an ordinary database owner with CREATEROLE, not superuser.
  await db.query('CREATE ROLE satima_admin LOGIN CREATEROLE PASSWORD '+pg.escapeLiteral(secret));
  await db.query('CREATE DATABASE satima_cms OWNER satima_admin');
- const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),REGISTRATION_VIEWER_USERNAME:'registration-review',REGISTRATION_VIEWER_PASSWORD_HASH:await hashViewerPassword(registrationSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
+ const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,FINANCE_USERNAME:'finance',FINANCE_PASSWORD_HASH:await hashViewerPassword('fictional-finance-test-password'),VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),REGISTRATION_VIEWER_USERNAME:'registration-review',REGISTRATION_VIEWER_PASSWORD_HASH:await hashViewerPassword(registrationSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
  migration(env);migration(env);
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
@@ -100,11 +100,40 @@ const adminWrongUsername=await request('/api/login',{method:'POST',headers:{Orig
 const adminWrongPassword=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:'incorrect-password'})});
 assert.equal(adminWrongUsername.status,401);assert.equal(adminWrongPassword.status,401);
 assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.json()).error,'Login errors must not identify which credential was wrong');
+ // Collections endpoints fail closed, including protected code and exports.
+ for(const path of ['/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'])assert.equal((await request(path)).status,401);
+ const financeLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'finance',password:'fictional-finance-test-password'})});
+ assert.equal(financeLogin.status,200);
+ const financeHeaders={Origin:'https://satima.example',Cookie:financeLogin.headers.get('set-cookie').split(';')[0]};
+ assert.equal((await request('/api/session',{headers:financeHeaders})).status,200);
+ assert.equal((await request('/api/farmers',{headers:financeHeaders})).status,403);
+ assert.equal((await request('/api/collections',{headers:financeHeaders})).status,503,'Missing source must not fall back to CMS data');
+ const financeHome=await request('/',{headers:financeHeaders});assert.match(await financeHome.text(),/Finance workspace/);
+ const financePage=await request('/collections',{headers:financeHeaders});assert.equal(financePage.status,200);assert.doesNotMatch(await financePage.text(),/data-nav="farmers"/);
+ const collectionsOwner=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await collectionsOwner.connect();
+ try{
+  const payload={records:[{row:2,name:'FICTIONAL COLLECTIONS ACCOUNT',amount:100,status:'Not Paid',group:'Unpaid',payment:0,balance:100}],summary:{accounts:1},sheet:'Synthetic test'};
+  await collectionsOwner.query("INSERT INTO collections_october_snapshot(id,workbook_sha256,dashboard_sha256,payload,presentation) VALUES('october',$1,$1,$2,$3)",['0'.repeat(64),payload,{html:'<p>Synthetic</p>',css:'',script:''}]);
+  await assert.rejects(collectionsOwner.query("UPDATE collections_october_snapshot SET payload='{}'"),/immutable/);
+  await assert.rejects(collectionsOwner.query('TRUNCATE collections_october_snapshot'),/immutable/);
+  const appClient=new pg.Client({connectionString:env.DATABASE_URL});await appClient.connect();
+  try{await assert.rejects(appClient.query('SELECT * FROM collections_october_sources'),e=>e.code==='42501');await assert.rejects(appClient.query('DELETE FROM collections_october_snapshot'),e=>e.code==='42501');}finally{await appClient.end();}
+  const data=await request('/api/collections',{headers:financeHeaders});assert.equal(data.status,200);assert.match(data.headers.get('cache-control'),/no-store/);assert.equal((await data.json()).records[0].row,2);
+  assert.equal((await request('/api/collections/dashboard.js',{headers:financeHeaders})).status,200);
+  const csv=await request('/api/collections/export.csv',{headers:financeHeaders});assert.equal(csv.status,200);assert.match(await csv.text(),/FICTIONAL COLLECTIONS ACCOUNT/);
+  assert.equal((await request('/api/collections/export.csv?filter=Paid',{headers:financeHeaders})).status,200);
+ }finally{await collectionsOwner.end();}
+ const collectionsViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});
+ const collectionsViewerHeaders={Cookie:collectionsViewerLogin.headers.get('set-cookie').split(';')[0]};
+ for(const path of ['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'])assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,403);
+ assert.equal((await request('/api/logout',{method:'POST',headers:financeHeaders,body:'{}'})).status,200);
+ assert.equal((await request('/api/collections/export.csv',{headers:financeHeaders})).status,401);
  phase='administrator login';
  const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});
 assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
  phase='administrator draft and farmer workflow';
+ assert.equal((await request('/api/collections',{headers})).status,200);
  const draftCookie=login.headers.get('set-cookie').match(/satima_draft_device=[a-f0-9]{64}/)?.[0];
  assert.ok(draftCookie,'Sign-in issues a private draft device cookie');
  const draftHeaders={...headers,Cookie:headers.Cookie+'; '+draftCookie};
@@ -676,7 +705,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await expiryOwner.query('SELECT count(*)::int AS n FROM form_drafts WHERE device_hash=$1',[deviceHash])).rows[0].n,0,'Logout clears private drafts on this device');
  }finally{await expiryOwner.end();}
  assert.equal((await request('/api/session',{headers:{Cookie:expiredCookie}})).status,401,'Expired persistent sessions are rejected');
- const suite=spawnSync(process.execPath,['--test','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs','app/tests/milk-performance.test.mjs','app/tests/milk-reconciliation-inventory.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/collections.test.mjs','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs','app/tests/milk-performance.test.mjs','app/tests/milk-reconciliation-inventory.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
  phase='historical milk performance import';
  const performanceAdminLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(performanceAdminLogin.status,200);
  const performanceViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});assert.equal(performanceViewerLogin.status,200);

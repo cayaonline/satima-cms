@@ -1,3 +1,4 @@
+import {collectionsRoutes} from './collections.mjs';
 import {PersistentSessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
@@ -30,9 +31,14 @@ const registrationViewerUsername=process.env.REGISTRATION_VIEWER_USERNAME,regist
 if((registrationViewerUsername||registrationViewerPasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(registrationViewerUsername||'')||!validViewerHash(registrationViewerPasswordHash)))throw new Error('Elevated viewer credentials must be configured together with a valid scrypt hash.');
 if(registrationViewerUsername&&registrationViewerUsername===viewerUsername)throw new Error('Operations usernames must be distinct.');
 const registrationViewerEnabled=!!(registrationViewerUsername&&registrationViewerPasswordHash);
+const financeUsername=process.env.FINANCE_USERNAME,financePasswordHash=process.env.FINANCE_PASSWORD_HASH;
+if((financeUsername||financePasswordHash)&&(!/^[A-Za-z0-9._-]{3,64}$/.test(financeUsername||'')||financeUsername==='admin'||!validViewerHash(financePasswordHash)))throw new Error('Finance credentials require a distinct username and valid scrypt hash.');
+const financeEnabled=!!(financeUsername&&financePasswordHash);
 const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/navigation.js':['navigation.js','text/javascript'],'/dates.js':['dates.js','text/javascript'],'/flagged-review.js':['flagged-review.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
+files['/collections-shell.js']=['collections-shell.js','text/javascript'];
+files['/collections-shell.css']=['collections-shell.css','text/css'];
 files['/home-support.js']=['home-support.js','text/javascript'];
 files['/milk-performance.js']=['milk-performance.js','text/javascript'];
 const directoryPages=new Set(['/farmers/category/satima','/farmers/category/larger-sagana','/farmers/category/kangema','/farmers/category/others','/farmers/awaiting-categorization','/farmers/flagged-records','/farmers/kra-verification','/milk-collection','/customers','/distributors']);
@@ -149,6 +155,10 @@ const server=http.createServer(async(req,res)=>{
  if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
+ if(path==='/collections'||path.startsWith('/api/collections')||path==='/'){
+  const role=await sessions.role(cookieToken(req)),viewer=await viewerSession(req);
+  if(await collectionsRoutes(req,res,path,url,{pool,role:role==='finance'&&!financeEnabled?null:role,viewerRole:viewer?.role}))return;
+ }
  const operationalDetail=/^\/(?:operations\/)?(?:milk-processing\/(?:batch|collection)|milk-distribution\/record)\/[a-f0-9-]{36}$/i.test(path);
  const distributorPage=/^\/(?:operations\/)?distributors\/[a-f0-9-]{36}$/i.test(path);
  const flaggedReviewPage=/^\/farmers\/flagged-records\/[a-f0-9-]{36}$/i.test(path);
@@ -178,8 +188,9 @@ const server=http.createServer(async(req,res)=>{
  if(typeof b.username!=='string'||!b.username.trim())throw new Problem(400,'Please enter your username.');
  if(typeof b.password!=='string'||!b.password)throw new Problem(400,'Please enter your password.');
  const validPassword=timingSafeEqual(hash(b.password),hash(process.env.CMS_PASSWORD));
- if(b.username!=='admin'||!validPassword)throw new Problem(401,'Incorrect username or password.');
- attempts.clear(key);const token=await sessions.issue(cookieToken(req));if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
+ const finance=financeEnabled&&b.username===financeUsername&&await verifyViewerPassword(b.password,financePasswordHash);
+ if(!finance&&(b.username!=='admin'||!validPassword))throw new Problem(401,'Incorrect username or password.');
+ attempts.clear(key);const token=await sessions.issue(cookieToken(req),finance?'finance':'administrator');if(!token)throw new Problem(503,'Sign-in capacity reached. Try again shortly.');
  res.setHeader('Set-Cookie',`satima_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${ttl/1000}${secureCookie}`);draftDevice(req,res);return send(res,200,{ok:true});
  }
  if(path.startsWith('/api/operations/')){
@@ -225,6 +236,12 @@ const server=http.createServer(async(req,res)=>{
   const viewerFarmer=path.match(/^\/api\/operations\/farmers\/([^/]+)$/);
   if(viewerFarmer){if(!uuid.test(viewerFarmer[1]))throw new Problem(400,'Invalid farmer identifier.');return send(res,200,await operationsFarmerDetail(pool,viewerFarmer[1]));}
   throw new Problem(404,'Not found.');
+ }
+ const financeToken=cookieToken(req);
+ if(financeEnabled&&await sessions.role(financeToken)==='finance'){
+  if(path==='/api/session'&&req.method==='GET')return send(res,200,{role:'finance'});
+  if(path==='/api/logout'&&req.method==='POST'){await sessions.revoke(financeToken);res.setHeader('Set-Cookie',`satima_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
+  throw new Problem(403,'Finance access is limited to Collections.');
  }
  const token=await session(req);if(!token)throw new Problem(401,'Sign in to continue.');
  if(path==='/api/session'&&req.method==='GET'){draftDevice(req,res);return send(res,200,{operator:'Operations team'});}

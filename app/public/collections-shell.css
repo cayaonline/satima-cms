@@ -1,0 +1,2 @@
+#collections-dashboard{min-width:0;width:100%}
+@media print{#workspace>aside,.workspace-header,.nav-backdrop{display:none!important}#workspace{display:block!important}#workspace>main{margin:0!important;width:100%!important}}
