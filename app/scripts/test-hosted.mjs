@@ -114,6 +114,28 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
  try{
   const payload={records:[{row:2,name:'FICTIONAL COLLECTIONS ACCOUNT',amount:100,status:'Not Paid',group:'Unpaid',payment:0,balance:100}],summary:{accounts:1},sheet:'Synthetic test'};
   await collectionsOwner.query("INSERT INTO collections_october_snapshot(id,workbook_sha256,dashboard_sha256,payload,presentation) VALUES('october',$1,$1,$2,$3)",['0'.repeat(64),payload,{html:'<p>Synthetic</p>',css:'',script:''}]);
+  await collectionsOwner.query("INSERT INTO collections_datasets(id,channel,kind,source_filename,source_sha256,classification_basis) VALUES('october','home_customers','receivables_snapshot','synthetic.xlsx',$1,'Synthetic test')",['0'.repeat(64)]);
+  await collectionsOwner.query("INSERT INTO collections_home_accounts(dataset_id,source_row,source_overdue,style_evidence) VALUES('october',2,true,'[]')");
+  await assert.rejects(collectionsOwner.query("UPDATE collections_home_accounts SET source_overdue=false"),/immutable/);
+  const reviewPath='/api/collections/accounts/2/reviews';
+  const review={overdueState:'not_overdue',reviewerName:'Synthetic Reviewer',reason:'Synthetic evidence reviewed',expectedRevision:'0',followUpStage:'contacted'};
+  assert.equal((await request(reviewPath,{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify(review)})).status,401);
+  assert.equal((await request(reviewPath,{method:'POST',headers:{...financeHeaders,Origin:'https://untrusted.example'},body:JSON.stringify(review)})).status,403);
+  assert.equal((await request(reviewPath,{method:'POST',headers:financeHeaders,body:JSON.stringify({...review,reason:''})})).status,400);
+  assert.equal((await request(reviewPath,{method:'POST',headers:financeHeaders,body:JSON.stringify(review)})).status,201);
+  assert.equal((await request(reviewPath,{method:'POST',headers:financeHeaders,body:JSON.stringify(review)})).status,409);
+  const reviewed=await (await request('/api/collections',{headers:financeHeaders})).json();
+  assert.equal(reviewed.records[0].sourceOverdue,true);assert.equal(reviewed.records[0].overdueState,'not_overdue');
+  assert.equal(reviewed.home.sourceFlaggedBalance,100);assert.equal(reviewed.home.currentOverdueListed,0);
+  assert.equal(reviewed.records[0].invoiceDate,null);assert.equal(reviewed.records[0].dueDate,null);
+  assert.equal(reviewed.retail.suppliedValue,null);assert.equal(reviewed.reporting.companyCollectionRate,null);
+  assert.equal(reviewed.retailers[0].code,'naivas');
+  const history=await (await request(reviewPath,{headers:financeHeaders})).json();assert.equal(history.entries.length,1);assert.match(history.entries[0].actor,/finance/);
+  await assert.rejects(collectionsOwner.query("UPDATE collections_account_reviews SET reason='changed'"),/immutable/);
+  await assert.rejects(collectionsOwner.query("INSERT INTO collections_retail_records(dataset_id,retailer_code,kind,source_reference,amount) VALUES('october','naivas','invoice','synthetic',1)"),e=>e.code==='23503');
+  await collectionsOwner.query("INSERT INTO collections_datasets(id,channel,kind,source_filename,source_sha256,classification_basis) VALUES('synthetic-retail','distributors_stores','retailer_records','synthetic.xlsx',$1,'Synthetic test')",['1'.repeat(64)]);
+  await assert.rejects(collectionsOwner.query("INSERT INTO collections_retail_records(dataset_id,retailer_code,kind,source_reference,amount,payment_verified,verified_at) VALUES('synthetic-retail','naivas','payment','synthetic',1,true,now())"),e=>e.code==='23514');
+  assert.equal((await collectionsOwner.query('SELECT count(*)::int AS n FROM collections_retail_records')).rows[0].n,0);
   await assert.rejects(collectionsOwner.query("UPDATE collections_october_snapshot SET payload='{}'"),/immutable/);
   await assert.rejects(collectionsOwner.query('TRUNCATE collections_october_snapshot'),/immutable/);
   const appClient=new pg.Client({connectionString:env.DATABASE_URL});await appClient.connect();
@@ -131,6 +153,9 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
   assert.equal((await request(path)).status,path==='/operations/collections'?303:401);
  }
  for(const path of ['/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/farmers'])assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,path.startsWith('/api/collections')?403:401);
+ const opsHistory=await (await request('/api/operations/collections/accounts/2/reviews',{headers:collectionsViewerHeaders})).json();
+ assert.equal(opsHistory.entries.length,1);
+ assert.equal((await request('/api/operations/collections/accounts/2/reviews',{method:'POST',headers:{...collectionsViewerHeaders,Origin:'https://satima.example'},body:JSON.stringify({overdueState:'overdue',reviewerName:'Synthetic Operations',reason:'Synthetic review after follow-up',expectedRevision:opsHistory.entries[0].id,followUpStage:'legal_review_requested'})})).status,201);
  assert.equal((await request('/api/operations/logout',{method:'POST',headers:{...collectionsViewerHeaders,Origin:'https://satima.example'},body:'{}'})).status,200);
  assert.equal((await request('/api/operations/collections/export.csv',{headers:collectionsViewerHeaders})).status,401);
  assert.equal((await request('/api/logout',{method:'POST',headers:financeHeaders,body:'{}'})).status,200);
@@ -712,7 +737,7 @@ let detail=await (await request('/api/farmers/'+farmer.id,{headers})).json();
   assert.equal((await expiryOwner.query('SELECT count(*)::int AS n FROM form_drafts WHERE device_hash=$1',[deviceHash])).rows[0].n,0,'Logout clears private drafts on this device');
  }finally{await expiryOwner.end();}
  assert.equal((await request('/api/session',{headers:{Cookie:expiredCookie}})).status,401,'Expired persistent sessions are rejected');
- const suite=spawnSync(process.execPath,['--test','app/tests/collections.test.mjs','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs','app/tests/milk-performance.test.mjs','app/tests/milk-reconciliation-inventory.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
+ const suite=spawnSync(process.execPath,['--test','app/tests/collections-flags.test.mjs','app/tests/collections-refinement.test.mjs','app/tests/collections.test.mjs','app/tests/hosting.test.mjs','app/tests/registration.test.mjs','app/tests/directory.test.mjs','app/tests/security.test.mjs','app/tests/kra-verification.test.mjs','app/tests/milk-ui.test.mjs','app/tests/milk-operations-ui.test.mjs','app/tests/master-sync.test.mjs','app/tests/home-support.test.mjs','app/tests/dates.test.mjs','app/tests/milk-performance.test.mjs','app/tests/milk-reconciliation-inventory.test.mjs'],{env:localEnv,encoding:'utf8'});assert.equal(suite.status,0,suite.stdout+suite.stderr);console.log(suite.stdout);
  phase='historical milk performance import';
  const performanceAdminLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});assert.equal(performanceAdminLogin.status,200);
  const performanceViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});assert.equal(performanceViewerLogin.status,200);

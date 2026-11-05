@@ -30,8 +30,9 @@ uses an authenticated data request instead of embedded account records. Headline
 status distribution and concentration metrics use the verified source data.
 
 Amounts labelled Paid remain source labels, not confirmed bank receipts. Partial
-payments and outstanding balances remain conditional. Missing dates, channel
-classification, reconciliation gaps and management-context caveats remain visible.
+payments and outstanding balances remain conditional. Missing dates, reconciliation gaps and management-context caveats remain visible.
+The owner has classified this workbook as Home Customers; this is recorded separately
+from the workbook, which has no channel column.
 No aging or Home/Store classification is inferred.
 
 ## Permissions
@@ -50,7 +51,8 @@ unchanged. The portal login, sidebar and headings are labelled Head of Operation
 existing URLs, usernames and passwords remain valid.
 
 Finance sessions have access only to their Home, Collections and session/logout
-endpoints; they do not gain Admin's operational data or write permissions.
+endpoints; they do not gain Admin's operational permissions. Authorized Collections users can
+append classification reviews through the reviewed workflow below.
 Every Collections data/script/export request checks the server-side role and uses
 `private, no-store`. CSV exports recheck authorization and neutralize spreadsheet
 formula injection while leaving stored source values intact. Page-specific CSP
@@ -94,3 +96,54 @@ the immutable evidence rather than deleting it.
 Head of Operations access is an explicit owner-authorized permission change.
 Anonymous users still cannot retrieve data, dashboard scripts or exports. No
 financial data is reimported or edited by this portal update.
+
+
+## Independent channels and source overdue flags
+
+Migration `040_collections_channels.sql` adds isolated source datasets, Home
+Customers metadata, append-only account reviews, separate future invoice records,
+and retailer/branch/financial-document/matching/exception tables. Composite foreign
+keys prevent Home datasets being used as store financial sources. Only Naivas
+configuration is seeded; there are no store financial amounts or branches.
+Verified retailer payments require a payment record, verification reference,
+reviewer and verification timestamp. Remittances are not verified payments.
+
+The October workbook is a customer receivables snapshot, not October invoices or
+sales. Snapshot date, invoice month, invoice dates and due dates stay NULL.
+Future dated invoice documents must have their own dataset and source references.
+The consolidated overview displays the channels separately and never adds a
+company-wide collection rate. Store metrics remain unavailable until a source
+import and reconciliation workflow is implemented for the supplied documents.
+
+The source flag extractor reads the original OOXML fills, retains cell/style/fill
+references and rejects conditional formatting for manual review. Run:
+
+```sh
+node app/scripts/refine-collections-source.mjs /private/Receivables\ October.xlsx --validate-only
+```
+
+After a verified backup, apply migration 040 with the owner, then run that command
+without `--validate-only`, using the private owner connection in
+`ADMIN_DATABASE_URL`. This compares source SHA and every account's row/name/amount
+to the immutable snapshot before inserting metadata. Repeating it verifies the
+same evidence; it cannot rewrite it. The original source and snapshot remain intact.
+
+The verified direct solid-red fills identify source overdue records. Their cell
+references and financial amounts remain in authenticated responses and private evidence. No other unpaid account is deemed
+overdue without an explicit staff review. Date unknown is a separate condition.
+
+GET/POST `/api/collections/accounts/:row/reviews` and its Operations equivalent
+require the existing authorized session. Writes also require the existing
+same-origin protection, a named reviewer, a reason, a valid classification and
+an expected revision. Concurrent stale reviews return 409. Database grants and
+triggers prohibit rewriting/deleting reviews; signed-in actor, named reviewer and
+server timestamp are retained. The form records follow-up/legal review stages;
+it does not send messages or initiate legal action. CSV includes source flags,
+current classifications, unknown date fields and follow-up stages.
+
+Validation covers direct red fills, missing evidence, independent payment/overdue
+states, filtered exports, unauthorized/cross-origin writes, concurrent reviews,
+append-only history, immutable source metadata, channel isolation, payment evidence
+constraints, and the existing hosted CMS regression suite. Browser checks cover
+both channel panels, preserved original sections, filters, exports, review form,
+sidebar and responsive widths of 1440, 768, 390 and 320 pixels.

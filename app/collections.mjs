@@ -1,3 +1,4 @@
+import {channelsData,reviewHistory,saveReview} from './collections-refinement.mjs';
 import {readFile} from 'node:fs/promises';
 
 export const collectionsAllowed = role => role === 'administrator' || role === 'finance' || role === 'head_of_operations';
@@ -38,11 +39,12 @@ export function preparePresentation(html,records){
 
 export function exportCsv(records,params){
  const group=params.get('filter')||'All',q=(params.get('q')||'').toLocaleLowerCase(),sort=params.get('sort')||'amountDesc';
- const rows=records.filter(r=>(group==='All'||r.group===group)&&r.name.toLocaleLowerCase().includes(q));
+ const flag=params.get('overdue')||'all';
+ const rows=records.filter(r=>(group==='All'||r.group===group)&&r.name.toLocaleLowerCase().includes(q)&&(flag==='all'||flag==='source'&&r.sourceOverdue===true||flag==='current'&&r.overdueState==='overdue'||flag==='due_unknown'&&!r.dueDate));
  rows.sort((a,b)=>sort==='nameAsc'?a.name.localeCompare(b.name):sort==='rowAsc'?a.row-b.row:sort==='amountAsc'?a.amount-b.amount:b.amount-a.amount);
  // Prevent spreadsheet formula execution without altering the stored source.
  const cell=value=>'"'+String(typeof value==='string'&&/^[\s]*[=+@\-\t\r]/.test(value)?"'"+value:value??'').replaceAll('"','""')+'"';
- return '\ufeff'+[['Original_Row','Account_Name','Listed_Amount_KES','Source_Status','Conditional_Payment_KES','Conditional_Balance_KES'],...rows.map(r=>[r.row,r.name,r.amount,r.status,r.payment,r.balance])].map(row=>row.map(cell).join(',')).join('\r\n');
+ return '\ufeff'+[['Original_Row','Account_Name','Listed_Amount_KES','Source_Status','Conditional_Payment_KES','Conditional_Balance_KES','Channel','Source_Overdue_Flag','Current_Overdue_Classification','Invoice_Date','Invoice_Month','Due_Date','Follow_Up_Stage'],...rows.map(r=>[r.row,r.name,r.amount,r.status,r.payment,r.balance,'Home Customers',r.sourceOverdue===null||r.sourceOverdue===undefined?'Unknown':r.sourceOverdue?'Yes':'No',r.overdueState||'Unknown',r.invoiceDate||'',r.invoiceMonth||'',r.dueDate||'',r.followUpStage||''])].map(row=>row.map(cell).join(',')).join('\r\n');
 }
 
 async function shell(role,home=false){
@@ -51,10 +53,10 @@ async function shell(role,home=false){
  let workspace=index.slice(index.indexOf('<div id="workspace"'),index.indexOf('</header>')+9).replace('id="workspace" hidden','id="workspace"');
  if(role==='finance')workspace=workspace.replace(/<div class="nav-group">[\s\S]*?<\/div>/g,group=>group.includes('data-nav="home"')?group:'').replaceAll('Admin Panel','Finance').replaceAll('Administrator','Finance');
  workspace=workspace.replace(/(id="breadcrumb">)[^<]*/,(_,prefix)=>prefix+(home?'Home':'Collections'));
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-refinement.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
 }
 
-export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole}){
+export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,readBody,actor}){
  const operations=path==='/operations/collections'||path.startsWith('/api/operations/collections');
  const headOfOperations=['viewer','registration_viewer'].includes(viewerRole);
  if(path==='/collections'&&!collectionsAllowed(role)&&headOfOperations&&req.method==='GET'){
@@ -62,12 +64,21 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole})
  }
  if(operations){path=path.replace('/api/operations/collections','/api/collections').replace('/operations/collections','/collections');role=headOfOperations?'head_of_operations':null;}
  const apiBase=operations?'/api/operations/collections':'/api/collections';
- if(!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
+ const review=path.match(/^\/api\/collections\/accounts\/(\d+)\/reviews$/);
+ if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
  if(!collectionsAllowed(role)){
   if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:operations?'/operations':'/'});res.end();return true;}
   throw problem(role||viewerRole?403:401,'Admin, Finance or Head of Operations access is required.');
  }
- if(req.method!=='GET')throw problem(405,'Collections is read-only.');
+ if(review){
+  res.setHeader('Cache-Control','private, no-store');
+  const row=Number(review[1]);let result;
+  if(req.method==='GET')result=await reviewHistory(pool,row,url.searchParams.get('before'));
+  else if(req.method==='POST')result=await saveReview(pool,row,await readBody(),`${actor||role} (${role})`);
+  else throw problem(405,'Unsupported review request.');
+  res.writeHead(req.method==='POST'?201:200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));return true;
+ }
+ if(req.method!=='GET')throw problem(405,'Financial source records are read-only.');
  res.setHeader('Cache-Control','private, no-store');
  if(path==='/collections'||path==='/'){
   // Original dashboard styles include inline chart widths; script execution remains self-only.
@@ -79,10 +90,10 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole})
  const {payload,presentation}=snapshot;
  if(path==='/api/collections'){
   res.writeHead(200,{'Content-Type':'application/json'});
-  res.end(JSON.stringify({records:payload.records,summary:payload.summary,sheet:payload.sheet,workbookSha256:snapshot.workbook_sha256,html:presentation.html,css:presentation.css}));return true;
+  res.end(JSON.stringify({...await channelsData(pool,payload.records),summary:payload.summary,sheet:payload.sheet,workbookSha256:snapshot.workbook_sha256,html:presentation.html,css:presentation.css}));return true;
  }
  if(path.endsWith('/export.csv')){
-  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Satima_October_Receivables_Filtered.csv"'});res.end(exportCsv(payload.records,url.searchParams));return true;
+  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Satima_October_Receivables_Filtered.csv"'});res.end(exportCsv((await channelsData(pool,payload.records)).records,url.searchParams));return true;
  }
  res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});
  res.end(`(async()=>{const host=document.getElementById('collections-dashboard');try{
@@ -106,6 +117,7 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole})
  if(!response.ok){alert('Export denied. Sign in again with an authorized Collections account.');return;}
  const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='Satima_October_Receivables_Filtered.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
  });
+ await window.satimaCollectionsRefinement.mount({root,data,apiBase:'${apiBase}',switchTab});
  }catch(error){host.textContent=error.message;host.setAttribute('role','alert');}})();`);
  return true;
 }
