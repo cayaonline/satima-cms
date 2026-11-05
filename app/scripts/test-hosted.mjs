@@ -45,7 +45,7 @@ try{
 const response=await request(route);assert.equal(response.status,200,route);assert.match(response.headers.get('content-type'),/text\/html/);assert.match(await response.text(),/id="directory"/);
  }
  for(const route of ['/operations','/operations/login','/operations/farmers/all','/operations/farmers/registered','/operations/farmers/not-registered','/operations/milk-collection','/operations/customers','/operations/distributors','/operations/category/satima','/operations/category/larger-sagana','/operations/category/kangema','/operations/category/others','/operations/kra-verification','/operations/customers/category/current','/operations/customers/category/lapsed','/operations/customers/category/geographically-isolated','/operations/customers/category/dormant','/operations/customers/category/retired','/operations/customers/awaiting-categorisation']){
-const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Operations Portal/);
+const response=await request(route);assert.equal(response.status,200,route);assert.match(await response.text(),/Morning Dew Head of Operations/);
  }
  for(const base of ['/farmers/kra-verification','/operations/kra-verification']){
   for(const bucket of ['all','verified','pending','invalid','missing','review']){
@@ -76,7 +76,7 @@ const response=await request(route);assert.equal(response.status,200,route);asse
  }
  const adminPage=await (await request('/')).text(),operationsPage=await (await request('/operations')).text();
  assert.match(adminPage,/<title>Satima Farmhouse CMS · Admin<\/title>/);
- assert.match(operationsPage,/<title>Satima Farmhouse CMS · Operations<\/title>/);
+ assert.match(operationsPage,/<title>Satima Farmhouse CMS · Head of Operations<\/title>/);
  for(const [route,type] of [['/favicon.ico','image/x-icon'],['/favicon-32.png','image/png'],['/apple-touch-icon.png','image/png'],['/icon-192.png','image/png'],['/icon-512.png','image/png'],['/site.webmanifest','application/manifest+json']]){
   const response=await request(route);assert.equal(response.status,200,route);assert.equal(response.headers.get('content-type'),type,route);assert.ok((await response.arrayBuffer()).byteLength>0,route);
  }
@@ -125,7 +125,14 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
  }finally{await collectionsOwner.end();}
  const collectionsViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  const collectionsViewerHeaders={Cookie:collectionsViewerLogin.headers.get('set-cookie').split(';')[0]};
- for(const path of ['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'])assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,403);
+ assert.equal((await request('/collections',{headers:collectionsViewerHeaders})).status,303);
+ for(const path of ['/operations/collections','/api/operations/collections','/api/operations/collections/dashboard.js','/api/operations/collections/export.csv']){
+  assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,200);
+  assert.equal((await request(path)).status,path==='/operations/collections'?303:401);
+ }
+ for(const path of ['/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/farmers'])assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,path.startsWith('/api/collections')?403:401);
+ assert.equal((await request('/api/operations/logout',{method:'POST',headers:{...collectionsViewerHeaders,Origin:'https://satima.example'},body:'{}'})).status,200);
+ assert.equal((await request('/api/operations/collections/export.csv',{headers:collectionsViewerHeaders})).status,401);
  assert.equal((await request('/api/logout',{method:'POST',headers:financeHeaders,body:'{}'})).status,200);
  assert.equal((await request('/api/collections/export.csv',{headers:financeHeaders})).status,401);
  phase='administrator login';

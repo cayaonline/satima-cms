@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 
-export const collectionsAllowed = role => role === 'administrator' || role === 'finance';
+export const collectionsAllowed = role => role === 'administrator' || role === 'finance' || role === 'head_of_operations';
 const problem = (status,message) => Object.assign(new Error(message),{status});
 
 // The supplied document stays private. Adapt its original HTML/CSS/JS, without an iframe.
@@ -46,18 +46,26 @@ export function exportCsv(records,params){
 }
 
 async function shell(role,home=false){
- const index=await readFile(new URL('./public/index.html',import.meta.url),'utf8');
+ const operations=role==='head_of_operations',apiBase=operations?'/api/operations/collections':'/api/collections';
+ const index=await readFile(new URL(operations?'./public/operations.html':'./public/index.html',import.meta.url),'utf8');
  let workspace=index.slice(index.indexOf('<div id="workspace"'),index.indexOf('</header>')+9).replace('id="workspace" hidden','id="workspace"');
  if(role==='finance')workspace=workspace.replace(/<div class="nav-group">[\s\S]*?<\/div>/g,group=>group.includes('data-nav="home"')?group:'').replaceAll('Admin Panel','Finance').replaceAll('Administrator','Finance');
  workspace=workspace.replace(/(id="breadcrumb">)[^<]*/,(_,prefix)=>prefix+(home?'Home':'Collections'));
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script>${home?'':'<script src="/api/collections/dashboard.js" defer></script>'}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
 }
 
 export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole}){
+ const operations=path==='/operations/collections'||path.startsWith('/api/operations/collections');
+ const headOfOperations=['viewer','registration_viewer'].includes(viewerRole);
+ if(path==='/collections'&&!collectionsAllowed(role)&&headOfOperations&&req.method==='GET'){
+  res.writeHead(303,{Location:'/operations/collections'});res.end();return true;
+ }
+ if(operations){path=path.replace('/api/operations/collections','/api/collections').replace('/operations/collections','/collections');role=headOfOperations?'head_of_operations':null;}
+ const apiBase=operations?'/api/operations/collections':'/api/collections';
  if(!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
  if(!collectionsAllowed(role)){
-  if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:'/'});res.end();return true;}
-  throw problem(role||viewerRole?403:401,'Admin or Finance access is required.');
+  if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:operations?'/operations':'/'});res.end();return true;}
+  throw problem(role||viewerRole?403:401,'Admin, Finance or Head of Operations access is required.');
  }
  if(req.method!=='GET')throw problem(405,'Collections is read-only.');
  res.setHeader('Cache-Control','private, no-store');
@@ -78,7 +86,7 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole})
  }
  res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});
  res.end(`(async()=>{const host=document.getElementById('collections-dashboard');try{
- const response=await fetch('/api/collections',{cache:'no-store'});if(!response.ok)throw new Error('Collections could not load. Sign in again or contact your administrator.');
+ const response=await fetch('${apiBase}',{cache:'no-store'});if(!response.ok)throw new Error('Collections could not load. Sign in again or contact your administrator.');
  const data=await response.json(),root=host.attachShadow({mode:'open'});host.textContent='';
  root.innerHTML='<style>'+data.css+'</style>'+data.html;
  ${presentation.script}
@@ -94,8 +102,8 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole})
  root.getElementById('printBtn').addEventListener('click',()=>window.print());
  root.getElementById('csvBtn').addEventListener('click',async()=>{
  const active=root.getElementById('accounts').classList.contains('active'),params=new URLSearchParams(active?{q:root.getElementById('search').value,filter:root.getElementById('filter').value,sort:root.getElementById('sort').value}:{});
- const response=await fetch('/api/collections/export.csv?'+params,{cache:'no-store'});
- if(!response.ok){alert('Export denied. Sign in again with Admin or Finance access.');return;}
+ const response=await fetch('${apiBase}/export.csv?'+params,{cache:'no-store'});
+ if(!response.ok){alert('Export denied. Sign in again with an authorized Collections account.');return;}
  const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='Satima_October_Receivables_Filtered.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
  });
  }catch(error){host.textContent=error.message;host.setAttribute('role','alert');}})();`);

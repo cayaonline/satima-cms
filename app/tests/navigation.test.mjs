@@ -7,22 +7,22 @@ const operationsHtml = await readFile(new URL('../public/operations.html', impor
 const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
 const js = await readFile(new URL('../public/navigation.js', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
-const expected = ['home', 'farmers', 'customers', 'distributors', 'milk', 'processing', 'distribution', 'support'];
+const expected = ['home', 'collections', 'farmers', 'customers', 'distributors', 'milk', 'processing', 'distribution', 'support'];
 
 function navLinks(html) {
   return [...html.matchAll(/<a class="nav" data-nav="([^"]+)" href="([^"]+)"/g)]
     .map(([, key, href]) => ({ key, href }));
 }
 
-test('admin and operations shells retain their existing eight navigation destinations', () => {
+test('admin and operations shells place Collections below Home and retain existing destinations', () => {
   assert.deepEqual(navLinks(adminHtml).map(link => link.key), expected);
   assert.deepEqual(navLinks(operationsHtml).map(link => link.key), expected);
   assert.deepEqual(navLinks(adminHtml).map(link => link.href), [
-    '/', '/farmers', '/customers', '/distributors', '/milk-collection',
+    '/', '/collections', '/farmers', '/customers', '/distributors', '/milk-collection',
     '/milk-processing', '/milk-distribution', '/contact-support',
   ]);
   assert.deepEqual(navLinks(operationsHtml).map(link => link.href), [
-    '/operations', '/operations/farmers', '/operations/customers', '/operations/distributors',
+    '/operations', '/operations/collections', '/operations/farmers', '/operations/customers', '/operations/distributors',
     '/operations/milk-collection', '/operations/milk-processing',
     '/operations/milk-distribution', '/operations/contact-support',
   ]);
@@ -39,7 +39,7 @@ test('both shells expose grouped navigation, current page breadcrumb, and labele
     assert.match(html, /id="logout"/);
     assert.match(html, /src="\/navigation\.js"/);
     assert.match(html, /class="sidebar-brand"[\s\S]*?class="drawer-close"/);
-    assert.match(html, /class="sidebar-identity"><span class="workspace-role">(?:Admin Panel|Operations Portal)<\/span>/);
+    assert.match(html, /class="sidebar-identity"><span class="workspace-role">(?:Admin Panel|Head of Operations)<\/span>/);
     assert.match(html, /class="sidebar-foot"><button id="logout"/);
     const sidebar = html.match(/<aside id="workspace-sidebar"[\s\S]*?<\/aside>/)?.[0] || '';
     assert.doesNotMatch(sidebar, /KRA verification access|Administration workspace|Morning Dew Operations<\/small>/);

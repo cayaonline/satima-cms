@@ -7,7 +7,7 @@ const html=readFileSync(new URL('../public/operations.html',import.meta.url),'ut
 
 test('operations shell keeps a compact portal label and startup does not query a missing sidebar element',()=>{
  assert.match(html,/class="workspace-role"/);
- assert.match(html,/class="workspace-role">Operations Portal<\/span>/);
+ assert.match(html,/class="workspace-role">Head of Operations<\/span>/);
  assert.doesNotMatch(operations,/#operations-sidebar-label|workspace-role/);
  assert.match(operations,/function showLogin\(\)[\s\S]*?\$\('#login'\)\.hidden=false/);
 });

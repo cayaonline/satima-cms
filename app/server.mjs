@@ -155,7 +155,7 @@ const server=http.createServer(async(req,res)=>{
  if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
- if(path==='/collections'||path.startsWith('/api/collections')||path==='/'){
+ if(path==='/collections'||path.startsWith('/api/collections')||path==='/operations/collections'||path.startsWith('/api/operations/collections')||path==='/'){
   const role=await sessions.role(cookieToken(req)),viewer=await viewerSession(req);
   if(await collectionsRoutes(req,res,path,url,{pool,role:role==='finance'&&!financeEnabled?null:role,viewerRole:viewer?.role}))return;
  }
@@ -195,7 +195,7 @@ const server=http.createServer(async(req,res)=>{
  }
  if(path.startsWith('/api/operations/')){
   const viewer=await viewerSession(req);
-  if(!viewer)throw new Problem(401,'Sign in to the Operations Portal.');
+  if(!viewer)throw new Problem(401,'Sign in to Head of Operations.');
   if(path==='/api/operations/session'&&req.method==='GET'){draftDevice(req,res);return send(res,200,{role:'viewer',sensitive_registration:viewer.role==='registration_viewer'});}
   if(path==='/api/operations/logout'&&req.method==='POST'){
    await viewerSessions.revoke(viewer.token);res.setHeader('Set-Cookie',`satima_viewer_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);await clearDevice(req,res);return send(res,200,{ok:true});
