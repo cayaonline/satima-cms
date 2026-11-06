@@ -28,7 +28,7 @@ test('server export preserves source values, filters, and neutralizes formula in
  assert.equal(exportCsv(records,new URLSearchParams({filter:'Paid'})).split('\r\n').length,1);
 });
 test('export authorization is checked before any database read, including Operations sessions',async()=>{
- for(const path of ['/api/collections/export.csv','/api/collections/dashboard.js']){
+ for(const path of ['/api/collections/export.csv','/api/collections/dashboard.js','/api/collections/sales/export.csv']){
   await assert.rejects(collectionsRoutes({method:'GET'},{},path,new URL('http://localhost'+path),{role:null,viewerRole:'registration_viewer',pool:{query(){throw new Error('Must not query');}}}),error=>error.status===403);
  }
 });
@@ -49,4 +49,11 @@ test('both authorized Head of Operations session types can read their isolated C
 });
 test('unknown or missing portal roles cannot access financial data',async()=>{
  for(const viewerRole of [null,'unknown'])await assert.rejects(collectionsRoutes({method:'GET'},{},'/api/operations/collections',new URL('http://localhost/api/operations/collections'),{role:null,viewerRole,pool:{query(){throw new Error('Must not query');}}}),e=>e.status===(viewerRole?403:401));
+});
+
+test('sales exports reject unknown Operations roles before database access',async()=>{
+ for(const viewerRole of [null,'unknown']){
+  const path='/api/operations/collections/sales/export.csv';
+  await assert.rejects(collectionsRoutes({method:'GET'},{},path,new URL('http://localhost'+path),{role:null,viewerRole,pool:{query(){throw new Error('Must not query');}}}),e=>e.status===(viewerRole?403:401));
+ }
 });

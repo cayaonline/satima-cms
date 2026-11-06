@@ -1,3 +1,4 @@
+import {salesData,salesCsv} from './collections-sales.mjs';
 import {retailData,retailCsv} from './collections-retail.mjs';
 import {channelsData,reviewHistory,saveReview} from './collections-refinement.mjs';
 import {readFile} from 'node:fs/promises';
@@ -45,7 +46,7 @@ export function exportCsv(records,params){
  rows.sort((a,b)=>sort==='nameAsc'?a.name.localeCompare(b.name):sort==='rowAsc'?a.row-b.row:sort==='amountAsc'?a.amount-b.amount:b.amount-a.amount);
  // Prevent spreadsheet formula execution without altering the stored source.
  const cell=value=>'"'+String(typeof value==='string'&&/^[\s]*[=+@\-\t\r]/.test(value)?"'"+value:value??'').replaceAll('"','""')+'"';
- return '\ufeff'+[['Original_Row','Account_Name','Listed_Amount_KES','Source_Status','Conditional_Payment_KES','Conditional_Balance_KES','Channel','Source_Overdue_Flag','Current_Overdue_Classification','Invoice_Date','Invoice_Month','Due_Date','Follow_Up_Stage'],...rows.map(r=>[r.row,r.name,r.amount,r.status,r.payment,r.balance,'Home Customers',r.sourceOverdue===null||r.sourceOverdue===undefined?'Unknown':r.sourceOverdue?'Yes':'No',r.overdueState||'Unknown',r.invoiceDate||'',r.invoiceMonth||'',r.dueDate||'',r.followUpStage||''])].map(row=>row.map(cell).join(',')).join('\r\n');
+ return '\ufeff'+[['Original_Row','Account_Name','Listed_Amount_KES','Source_Status','Conditional_Payment_KES','Conditional_Balance_KES','Channel','Source_Red_Highlight','Current_Overdue_Classification','Invoice_Date','Invoice_Month','Due_Date','Follow_Up_Stage'],...rows.map(r=>[r.row,r.name,r.amount,r.status,r.payment,r.balance,'Home Customers',r.sourceOverdue===null||r.sourceOverdue===undefined?'Unknown':r.sourceOverdue?'Yes':'No',r.overdueState||'Unknown',r.invoiceDate||'',r.invoiceMonth||'',r.dueDate||'',r.followUpStage||''])].map(row=>row.map(cell).join(',')).join('\r\n');
 }
 
 async function shell(role,home=false){
@@ -54,7 +55,7 @@ async function shell(role,home=false){
  let workspace=index.slice(index.indexOf('<div id="workspace"'),index.indexOf('</header>')+9).replace('id="workspace" hidden','id="workspace"');
  if(role==='finance')workspace=workspace.replace(/<div class="nav-group">[\s\S]*?<\/div>/g,group=>group.includes('data-nav="home"')?group:'').replaceAll('Admin Panel','Finance').replaceAll('Administrator','Finance');
  workspace=workspace.replace(/(id="breadcrumb">)[^<]*/,(_,prefix)=>prefix+(home?'Home':'Collections'));
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-retail.js" defer></script><script src="/collections-refinement.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-retail.js" defer></script><script src="/collections-refinement.js" defer></script><script src="/collections-simple.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
 }
 
 export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,readBody,actor}){
@@ -66,7 +67,7 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
  if(operations){path=path.replace('/api/operations/collections','/api/collections').replace('/operations/collections','/collections');role=headOfOperations?'head_of_operations':null;}
  const apiBase=operations?'/api/operations/collections':'/api/collections';
  const review=path.match(/^\/api\/collections\/accounts\/(\d+)\/reviews$/);
- if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/collections/retail/naivas/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
+ if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/collections/retail/naivas/export.csv','/api/collections/sales/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
  if(!collectionsAllowed(role)){
   if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:operations?'/operations':'/'});res.end();return true;}
   throw problem(role||viewerRole?403:401,'Admin, Finance or Head of Operations access is required.');
@@ -85,6 +86,10 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
   // Original dashboard styles include inline chart widths; script execution remains self-only.
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(await shell(role,path==='/'));return true;
+ }
+ if(path==='/api/collections/sales/export.csv'){
+  const sales=await salesData(pool);if(!sales.available)throw problem(503,'October invoice source has not been imported.');
+  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="October_Sales_Report.csv"'});res.end(salesCsv(sales,url.searchParams));return true;
  }
  if(path==='/api/collections/retail/naivas/export.csv'){
   const retail=await retailData(pool);if(!retail.available)throw problem(503,'No Naivas statement has been imported.');
@@ -125,6 +130,7 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
  const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='Satima_October_Receivables_Filtered.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
  });
  await window.satimaCollectionsRefinement.mount({root,data,apiBase:'${apiBase}',switchTab});
+ window.satimaCollectionsSimple.mount({root,data,apiBase:'${apiBase}',switchTab});
  }catch(error){host.textContent=error.message;host.setAttribute('role','alert');}})();`);
  return true;
 }

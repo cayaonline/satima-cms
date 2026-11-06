@@ -1,8 +1,9 @@
+import {salesData} from './collections-sales.mjs';
 import {retailData} from './collections-retail.mjs';
 const problem=(status,message)=>Object.assign(new Error(message),{status});
 const stages=['contact_planned','contacted','promise_to_pay','disputed','legal_review_requested','legal_referred','closed'];
 export function validateReview(input){
- if(!input||!['overdue','not_overdue','needs_review'].includes(input.overdueState))throw problem(400,'Choose an overdue classification.');
+ if(!input||!['overdue','not_overdue','needs_review','overpaid'].includes(input.overdueState))throw problem(400,'Choose an overdue classification.');
  const reason=typeof input.reason==='string'?input.reason.trim():'',reviewer=typeof input.reviewerName==='string'?input.reviewerName.trim():'';
  if(reason.length<5||reason.length>2000)throw problem(400,'Provide a review reason between 5 and 2,000 characters.');
  if(reviewer.length<2||reviewer.length>150)throw problem(400,'Provide the reviewer name.');
@@ -16,8 +17,8 @@ export function enrichHome(records,metadata,reviews){
   const source=byRow.get(record.row),review=latest.get(record.row);
   return {...record,channel:'home_customers',sourceOverdue:source?.source_overdue??null,styleEvidence:source?.style_evidence??[],
    invoiceDate:source?.invoice_date??null,invoiceMonth:source?.invoice_month??null,dueDate:source?.due_date??null,
-   overdueState:review?.overdue_state||(source?.source_overdue?'overdue':source?'not_flagged':'unknown'),
-   classificationBasis:review?'staff_review':source?.source_overdue?'workbook_red_fill':source?'no_source_flag':'not_verified',
+   overdueState:review?.overdue_state||(source?.source_overdue?'needs_review':source?'not_flagged':'unknown'),
+   classificationBasis:review?'staff_review':source?.source_overdue?'workbook_red_review_flag':source?'no_source_flag':'not_verified',
    reviewId:String(review?.id||'0'),followUpStage:review?.follow_up_stage??null};
  });
 }
@@ -32,13 +33,13 @@ export function homeSummary(records){
   legalReviewsRecorded:records.filter(r=>['legal_review_requested','legal_referred'].includes(r.followUpStage)).length};
 }
 export async function channelsData(pool,records){
- const [source,latest,retailers,retail]=await Promise.all([
+ const [source,latest,retailers,retail,sales]=await Promise.all([
   pool.query("SELECT * FROM collections_home_accounts WHERE dataset_id='october' ORDER BY source_row"),
   pool.query("SELECT DISTINCT ON (source_row) * FROM collections_account_reviews WHERE dataset_id='october' ORDER BY source_row,id DESC"),
-  pool.query('SELECT code,name,source_status FROM collections_retailers ORDER BY code'),retailData(pool)
+  pool.query('SELECT code,name,source_status FROM collections_retailers ORDER BY code'),retailData(pool),salesData(pool)
  ]);
  const enriched=enrichHome(records,source.rows,latest.rows);
- return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail,
+ return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail,sales,
   reporting:{label:'Customer receivables snapshot supplied in the October workbook',invoiceMonth:null,invoiceDate:null,snapshotAsOf:null,classificationBasis:'Home Customers channel assigned by owner clarification, not inferred from account names.',companyCollectionRate:null}};
 }
 export async function reviewHistory(pool,row,before){

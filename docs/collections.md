@@ -98,7 +98,7 @@ Anonymous users still cannot retrieve data, dashboard scripts or exports. No
 financial data is reimported or edited by this portal update.
 
 
-## Independent channels and source overdue flags
+## Independent channels and source review flags
 
 Migration `040_collections_channels.sql` adds isolated source datasets, Home
 Customers metadata, append-only account reviews, separate future invoice records,
@@ -128,9 +128,12 @@ without `--validate-only`, using the private owner connection in
 to the immutable snapshot before inserting metadata. Repeating it verifies the
 same evidence; it cannot rewrite it. The original source and snapshot remain intact.
 
-The verified direct solid-red fills identify source overdue records. Their cell
-references and financial amounts remain in authenticated responses and private evidence. No other unpaid account is deemed
-overdue without an explicit staff review. Date unknown is a separate condition.
+The verified direct solid-red fills identify accounts requiring review. The latest
+owner clarification says red may mean overpayment OR extended debt. Default
+classification is needs_review, not overdue. Existing explicit staff reviews stay
+intact. Cell references and original amounts remain private, traceable evidence.
+Date unknown is a separate condition. The legacy source_overdue database field
+retains raw fill evidence for compatibility; it is not a financial conclusion.
 
 GET/POST `/api/collections/accounts/:row/reviews` and its Operations equivalent
 require the existing authorized session. Writes also require the existing
@@ -196,3 +199,49 @@ exports and spreadsheet-formula neutralization, missing versus zero payment
 metrics, independent channels, immutable archives/records, runtime database grants,
 unauthorized access, and the hosted regression suite. Browser validation includes
 branch and exception filters, invoice/PO search, exports and mobile layouts.
+
+
+## October sales report and simplified views (migration 042)
+
+The accountant's newer `October Invoices.xlsx` includes home invoice rows and
+five distributor totals. It updates billing evidence, not payment status. Home
+names are grouped exactly for display; no identity merge with CMS masters occurs.
+Invoice IDs, dates, due dates and payment allocations are absent. Reporting month
+is October 2026 from supplied context; individual invoice dates remain NULL.
+
+The read-only extractor independently recomputes each summary using Decimal,
+validates its formula and cached value, and refuses unmapped distributor labels.
+KPS and OTW map only to the owner-specified parent distributors. The Naivas total
+and detailed statement support the same billed amount and are never added twice.
+Original workbook bytes and SHA-256 go into `collections_sales_evidence`, denied
+to the runtime role. `collections_sales_reports` stores immutable source rows,
+cell references, raw values and independent channel totals. Runtime access is
+SELECT only. No source bytes, names or financial fixtures go into public Git.
+
+The five simplified views retain the original dashboard through historical source
+and account review links. Unknown current balances, payments and aging display
+missing-data explanations. Source-highlighted accounts default to needs_review.
+Authorized reviewers may record overpaid, overdue or not_overdue with a reason,
+entered name and session actor. The entered name is not a separately authenticated
+staff identity. Existing optimistic concurrency and append-only history apply.
+
+Sales exports use `/api/collections/sales/export.csv` and the Operations equivalent,
+with existing server-side authentication, role checks, no-store responses and CSV
+formula neutralization. Parent distributors are separate from store branches.
+Naivas branch details remain available; other distributor totals have no inferred
+branches, statement balances or payment figures.
+
+### Deployment sequence after review
+
+1. Preserve the existing backup and migration checksum workflow.
+2. Apply migration 042 using the private owner connection before releasing code.
+3. Run `node app/scripts/import-october-invoices.mjs /private/October\ Invoices.xlsx --validate-only`.
+4. Run the same command without `--validate-only` using `ADMIN_DATABASE_URL` privately.
+   Identical SHA imports are no-ops; a changed source requires reviewed versioning.
+5. Deploy this branch through the existing Render CMS service. No new service.
+6. Verify Admin and Head of Operations pages, protected exports, all five views,
+   historical review history and existing modules. Confirm anonymous access fails.
+
+The historical snapshot and Naivas imports do not need to be repeated. This
+revision is prepared locally and has not been deployed. Rollback the application
+revision if needed; retain immutable imported evidence and additive schema.
