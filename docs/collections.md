@@ -147,3 +147,52 @@ append-only history, immutable source metadata, channel isolation, payment evide
 constraints, and the existing hosted CMS regression suite. Browser checks cover
 both channel panels, preserved original sections, filters, exports, review form,
 sidebar and responsive widths of 1440, 768, 390 and 320 pixels.
+
+## Naivas statement integration
+
+Migration `041_naivas_statement.sql` adds an immutable private source archive and
+statement controls, plus original purchase-order strings, source rows/cells and
+quality flags on the isolated retailer invoice ledger. The app cannot read the
+archive bytes or write invoice records. The imported statement is marked
+`under_review`; it is not promoted to reconciled merely because its total matches.
+
+The read-only importer supports the supplied Naivas customer statement layout.
+It uses Decimal arithmetic and the workbook's date system to decode numeric dates,
+retains original cells alongside parsed dates, and refuses unrecognized transactions,
+negative invoice amounts, formulas requiring review, and incomplete records.
+A changed statement for the same period requires a reviewed new source version;
+identical source bytes are not imported twice. Repeated invoice references are
+retained as separate source rows, never silently deduplicated. Imported retailer
+records and statement evidence reject updates, deletes and truncation.
+
+```sh
+node app/scripts/import-naivas-statement.mjs /private/Naivas\ Oct\ Statement.xlsx --validate-only
+```
+
+Apply migration 041 after the encrypted backup and migration checksum checks, then
+run the command without `--validate-only` using the private owner connection.
+No source workbook or customer/retailer financial data belongs in Git or public
+assets. The existing Home Customers source does not need reimporting.
+
+The authenticated Collections response includes the latest Naivas statement's
+records, branch totals, original statement controls and review findings. All
+statement rows contribute to the listed invoice value, including dates outside
+its declared period. A separate subtotal shows invoice dates within the period.
+The UI labels the balance and amount paid as statement-reported. A reported zero
+paid does not establish zero verified bank receipts. Supply, remittance and
+verified-collection metrics remain NULL until the corresponding evidence exists.
+There is still no company-wide collection rate or join to operational customers.
+
+The source review register distinguishes dates outside the statement period,
+due dates preceding invoice dates, due-year differences, repeated references,
+unusual invoice-reference formatting and PO whitespace. These are review findings,
+not automatic corrections or assertions of duplicate billing. Source cells and
+original reference characters remain available in the protected filtered export:
+`/api/collections/retail/naivas/export.csv` and its Operations equivalent.
+
+The existing Admin/Finance and Head of Operations session controls protect the
+retailer response and exports. Tests cover source-date preservation, filtered
+exports and spreadsheet-formula neutralization, missing versus zero payment
+metrics, independent channels, immutable archives/records, runtime database grants,
+unauthorized access, and the hosted regression suite. Browser validation includes
+branch and exception filters, invoice/PO search, exports and mobile layouts.

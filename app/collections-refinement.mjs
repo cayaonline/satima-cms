@@ -1,3 +1,4 @@
+import {retailData} from './collections-retail.mjs';
 const problem=(status,message)=>Object.assign(new Error(message),{status});
 const stages=['contact_planned','contacted','promise_to_pay','disputed','legal_review_requested','legal_referred','closed'];
 export function validateReview(input){
@@ -31,13 +32,13 @@ export function homeSummary(records){
   legalReviewsRecorded:records.filter(r=>['legal_review_requested','legal_referred'].includes(r.followUpStage)).length};
 }
 export async function channelsData(pool,records){
- const [source,latest,retailers]=await Promise.all([
+ const [source,latest,retailers,retail]=await Promise.all([
   pool.query("SELECT * FROM collections_home_accounts WHERE dataset_id='october' ORDER BY source_row"),
   pool.query("SELECT DISTINCT ON (source_row) * FROM collections_account_reviews WHERE dataset_id='october' ORDER BY source_row,id DESC"),
-  pool.query('SELECT code,name,source_status FROM collections_retailers ORDER BY code')
+  pool.query('SELECT code,name,source_status FROM collections_retailers ORDER BY code'),retailData(pool)
  ]);
  const enriched=enrichHome(records,source.rows,latest.rows);
- return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail:{available:false,suppliedValue:null,billedValue:null,remittanceValue:null,verifiedCollections:null,outstanding:null,exceptions:null,reason:'Awaiting retailer source documents and reconciliation. Naivas is first; Chandarana and other retailers follow.'},
+ return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail,
   reporting:{label:'Customer receivables snapshot supplied in the October workbook',invoiceMonth:null,invoiceDate:null,snapshotAsOf:null,classificationBasis:'Home Customers channel assigned by owner clarification, not inferred from account names.',companyCollectionRate:null}};
 }
 export async function reviewHistory(pool,row,before){

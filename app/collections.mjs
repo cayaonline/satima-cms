@@ -1,3 +1,4 @@
+import {retailData,retailCsv} from './collections-retail.mjs';
 import {channelsData,reviewHistory,saveReview} from './collections-refinement.mjs';
 import {readFile} from 'node:fs/promises';
 
@@ -53,7 +54,7 @@ async function shell(role,home=false){
  let workspace=index.slice(index.indexOf('<div id="workspace"'),index.indexOf('</header>')+9).replace('id="workspace" hidden','id="workspace"');
  if(role==='finance')workspace=workspace.replace(/<div class="nav-group">[\s\S]*?<\/div>/g,group=>group.includes('data-nav="home"')?group:'').replaceAll('Admin Panel','Finance').replaceAll('Administrator','Finance');
  workspace=workspace.replace(/(id="breadcrumb">)[^<]*/,(_,prefix)=>prefix+(home?'Home':'Collections'));
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-refinement.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-retail.js" defer></script><script src="/collections-refinement.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
 }
 
 export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,readBody,actor}){
@@ -65,7 +66,7 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
  if(operations){path=path.replace('/api/operations/collections','/api/collections').replace('/operations/collections','/collections');role=headOfOperations?'head_of_operations':null;}
  const apiBase=operations?'/api/operations/collections':'/api/collections';
  const review=path.match(/^\/api\/collections\/accounts\/(\d+)\/reviews$/);
- if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
+ if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/collections/retail/naivas/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
  if(!collectionsAllowed(role)){
   if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:operations?'/operations':'/'});res.end();return true;}
   throw problem(role||viewerRole?403:401,'Admin, Finance or Head of Operations access is required.');
@@ -85,15 +86,21 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(await shell(role,path==='/'));return true;
  }
+ if(path==='/api/collections/retail/naivas/export.csv'){
+  const retail=await retailData(pool);if(!retail.available)throw problem(503,'No Naivas statement has been imported.');
+  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Naivas_Statement_Invoices.csv"'});res.end(retailCsv(retail,url.searchParams));return true;
+ }
  const {rows:[snapshot]}=await pool.query("SELECT payload,presentation,workbook_sha256 FROM collections_october_snapshot WHERE id='october'");
  if(!snapshot)throw problem(503,'October source files have not been imported. Contact your administrator.');
  const {payload,presentation}=snapshot;
  if(path==='/api/collections'){
+  const channels=await channelsData(pool,payload.records);
   res.writeHead(200,{'Content-Type':'application/json'});
-  res.end(JSON.stringify({...await channelsData(pool,payload.records),summary:payload.summary,sheet:payload.sheet,workbookSha256:snapshot.workbook_sha256,html:presentation.html,css:presentation.css}));return true;
+  res.end(JSON.stringify({...channels,summary:payload.summary,sheet:payload.sheet,workbookSha256:snapshot.workbook_sha256,html:presentation.html,css:presentation.css}));return true;
  }
  if(path.endsWith('/export.csv')){
-  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Satima_October_Receivables_Filtered.csv"'});res.end(exportCsv((await channelsData(pool,payload.records)).records,url.searchParams));return true;
+  const csv=exportCsv((await channelsData(pool,payload.records)).records,url.searchParams);
+  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Satima_October_Receivables_Filtered.csv"'});res.end(csv);return true;
  }
  res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});
  res.end(`(async()=>{const host=document.getElementById('collections-dashboard');try{

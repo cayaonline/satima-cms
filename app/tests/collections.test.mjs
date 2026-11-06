@@ -37,7 +37,7 @@ test('both authorized Head of Operations session types can read their isolated C
  for(const viewerRole of ['viewer','registration_viewer']){
   let response='',headers,status;
   const res={setHeader(){},writeHead(code,value){status=code;headers=value;},end(value){response=value;}};
-  const pool={query:async()=>({rows:[{payload:{records,summary:{}},presentation:{html:'',css:'',script:''}}]})};
+  const pool={query:async sql=>({rows:sql.includes('collections_october_snapshot')?[{payload:{records,summary:{}},presentation:{html:'',css:'',script:''}}]:[]})};
   await collectionsRoutes({method:'GET'},res,'/api/operations/collections',new URL('http://localhost/api/operations/collections'),{role:null,viewerRole,pool});
   assert.equal(status,200);assert.equal(JSON.parse(response).records[0].name,'FICTIONAL ACCOUNT');
   await collectionsRoutes({method:'GET'},res,'/api/operations/collections/dashboard.js',new URL('http://localhost/api/operations/collections/dashboard.js'),{role:null,viewerRole,pool});
