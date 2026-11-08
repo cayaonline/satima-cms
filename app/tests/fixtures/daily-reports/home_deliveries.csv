@@ -1,0 +1,2 @@
+report_id,operational_date,is_current_version,customer_id,customer_name,address,phone,qty_1l_bottles,qty_500ml_bottles
+fictional-eod-1,2026-07-01,true,FICTIONAL-CUSTOMER-KEY,Fictional Privacy Name,12 Fictional Lane,+254700000099,1,0

@@ -13,6 +13,7 @@ import {hashViewerPassword} from '../security.mjs';
 import {PDFDocument} from 'pdf-lib';
 import {importPerformance,loadSource} from './import-milk-performance.mjs';
 import {monthlyView} from '../milk-performance.mjs';
+import {ensureDailyImportVersion,SOURCE_FILES} from './import-daily-reports.mjs';
 const docker=process.env.DOCKER||'/Applications/Docker.app/Contents/Resources/bin/docker';
 const name='satima-hosting-test-'+randomBytes(4).toString('hex');
 const secret=randomBytes(24).toString('hex'),appSecret=randomBytes(24).toString('hex'),cmsSecret=randomBytes(9).toString('base64url').slice(0,9),viewerSecret=randomBytes(9).toString('base64url').slice(0,9),registrationSecret=randomBytes(18).toString('base64url');
@@ -32,6 +33,22 @@ try{
  await db.query('CREATE DATABASE satima_cms OWNER satima_admin');
  const env={...process.env,ADMIN_DATABASE_URL:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`,APP_DB_PASSWORD:appSecret,CMS_PASSWORD:cmsSecret,FINANCE_USERNAME:'finance',FINANCE_PASSWORD_HASH:await hashViewerPassword('fictional-finance-test-password'),VIEWER_USERNAME:'operations',VIEWER_PASSWORD_HASH:await hashViewerPassword(viewerSecret),REGISTRATION_VIEWER_USERNAME:'registration-review',REGISTRATION_VIEWER_PASSWORD_HASH:await hashViewerPassword(registrationSecret),PORT:'31987',PUBLIC_ORIGIN:'https://satima.example',RENDER:'true'};
  migration(env);migration(env);
+ const dailyOwner=new pg.Client({connectionString:env.ADMIN_DATABASE_URL});await dailyOwner.connect();
+ try{
+  assert.equal((await dailyOwner.query("SELECT has_table_privilege('satima_app','daily_report_sources','SELECT') AS can_read")).rows[0].can_read,false);
+  for(const table of ['daily_report_imports','daily_report_days','daily_report_store_lines','daily_report_home_monthly'])assert.equal((await dailyOwner.query('SELECT has_table_privilege($1,$2,$3) AS allowed',['satima_app',table,'SELECT'])).rows[0].allowed,true);
+  const reportColumns=await dailyOwner.query("SELECT column_name FROM information_schema.columns WHERE table_name IN ('daily_report_imports','daily_report_days','daily_report_store_lines','daily_report_home_monthly')");assert.doesNotMatch(reportColumns.rows.map(x=>x.column_name).join(' '),/customer_name|customer_address|phone|customer_key/i);
+  const fixtureShas=Object.fromEntries(await Promise.all(SOURCE_FILES.map(async file=>[file,createHash('sha256').update(await readFile(new URL('../tests/fixtures/daily-reports/'+file,import.meta.url))).digest('hex')])));
+  await dailyOwner.query("INSERT INTO daily_report_imports(id,source_shas,row_counts,expected_control_totals,importer_version,actor) VALUES('hosted-fictional-daily-test',$1,'{}','{}','test','hosted test')",[fixtureShas]);
+  assert.equal(await ensureDailyImportVersion(dailyOwner,'hosted-fictional-daily-test',fixtureShas),true);
+  await assert.rejects(ensureDailyImportVersion(dailyOwner,'hosted-fictional-daily-test',{fixture:'f'.repeat(64)}),/reviewed new import version/);
+  await dailyOwner.query("INSERT INTO daily_report_days(operational_date,report_type,report_available,validation_status,import_id) VALUES('2026-07-01','EOD',true,'OK','hosted-fictional-daily-test')");
+  await assert.rejects(dailyOwner.query("UPDATE daily_report_days SET validation_status='DISCREPANCY'"),/immutable/);
+  await assert.rejects(dailyOwner.query("DELETE FROM daily_report_imports WHERE id='hosted-fictional-daily-test'"),/immutable/);
+  await assert.rejects(dailyOwner.query('TRUNCATE daily_report_store_lines'),/immutable/);await assert.rejects(dailyOwner.query('DELETE FROM daily_report_sources'),/immutable/);await assert.rejects(dailyOwner.query('DELETE FROM daily_report_home_monthly'),/immutable/);
+ }finally{await dailyOwner.end();}
+ const appRoleCheck=new pg.Client({connectionString:env.DATABASE_URL||`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`});await appRoleCheck.connect();
+ try{await assert.rejects(appRoleCheck.query('SELECT * FROM daily_report_sources'),/permission denied/);await appRoleCheck.query('SELECT * FROM daily_report_days');}finally{await appRoleCheck.end();}
  env.DATABASE_URL=`postgresql://satima_app:${appSecret}@127.0.0.1:${port}/satima_cms`;
  delete env.ADMIN_DATABASE_URL;delete env.APP_DB_PASSWORD;
  server=spawn(process.execPath,['app/scripts/start-hosted.mjs'],{env,stdio:['ignore','pipe','pipe']});
@@ -102,6 +119,7 @@ assert.equal(adminWrongUsername.status,401);assert.equal(adminWrongPassword.stat
 assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.json()).error,'Login errors must not identify which credential was wrong');
  // Collections endpoints fail closed, including protected code and exports.
  for(const path of ['/api/collections','/api/collections/dashboard.js','/api/collections/export.csv'])assert.equal((await request(path)).status,401);
+ for(const [path,status] of [['/daily-reports',303],['/operations/daily-reports',303],['/api/daily-reports',401],['/api/daily-reports/daily-reports.js',401],['/api/daily-reports/export.csv',401],['/api/operations/daily-reports',401],['/api/operations/daily-reports/export.csv',401]])assert.equal((await request(path)).status,status,path);
  const financeLogin=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'finance',password:'fictional-finance-test-password'})});
  assert.equal(financeLogin.status,200);
  const financeHeaders={Origin:'https://satima.example',Cookie:financeLogin.headers.get('set-cookie').split(';')[0]};
@@ -109,7 +127,7 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
  assert.equal((await request('/api/farmers',{headers:financeHeaders})).status,403);
  assert.equal((await request('/api/collections',{headers:financeHeaders})).status,503,'Missing source must not fall back to CMS data');
  const financeHome=await request('/',{headers:financeHeaders});assert.match(await financeHome.text(),/Finance workspace/);
- const financePage=await request('/collections',{headers:financeHeaders});assert.equal(financePage.status,200);assert.doesNotMatch(await financePage.text(),/data-nav="farmers"/);
+ const financePage=await request('/collections',{headers:financeHeaders});assert.equal(financePage.status,200);const financeHtml=await financePage.text();assert.doesNotMatch(financeHtml,/data-nav="farmers"/);assert.doesNotMatch(financeHtml,/data-nav="daily-reports"/);assert.equal((await request('/api/daily-reports',{headers:financeHeaders})).status,403);assert.equal((await request('/api/operations/daily-reports',{headers:financeHeaders})).status,403);
  const collectionsOwner=new pg.Client({connectionString:`postgresql://satima_admin:${secret}@127.0.0.1:${port}/satima_cms`});await collectionsOwner.connect();
  try{
   const payload={records:[{row:2,name:'FICTIONAL COLLECTIONS ACCOUNT',amount:100,status:'Not Paid',group:'Unpaid',payment:0,balance:100}],summary:{accounts:1},sheet:'Synthetic test'};
@@ -169,6 +187,7 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
  }finally{await collectionsOwner.end();}
  const collectionsViewerLogin=await request('/api/operations/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'operations',password:viewerSecret})});
  const collectionsViewerHeaders={Cookie:collectionsViewerLogin.headers.get('set-cookie').split(';')[0]};
+ assert.equal((await request('/daily-reports',{headers:collectionsViewerHeaders})).status,303);assert.equal((await request('/operations/daily-reports',{headers:collectionsViewerHeaders})).status,200);assert.equal((await request('/api/operations/daily-reports',{headers:collectionsViewerHeaders})).status,200);assert.equal((await request('/api/operations/daily-reports/daily-reports.js',{headers:collectionsViewerHeaders})).status,200);const dailyExport=await request('/api/operations/daily-reports/export.csv',{headers:collectionsViewerHeaders});assert.equal(dailyExport.status,200);assert.match(dailyExport.headers.get('cache-control'),/private, no-store/);
  assert.equal((await request('/collections',{headers:collectionsViewerHeaders})).status,303);
  for(const path of ['/operations/collections','/api/operations/collections','/api/operations/collections/dashboard.js','/api/operations/collections/export.csv']){
   assert.equal((await request(path,{headers:collectionsViewerHeaders})).status,200);
@@ -181,13 +200,14 @@ assert.equal((await adminWrongUsername.json()).error,(await adminWrongPassword.j
  assert.equal(opsHistory.entries.length,1);
  assert.equal((await request('/api/operations/collections/accounts/2/reviews',{method:'POST',headers:{...collectionsViewerHeaders,Origin:'https://satima.example'},body:JSON.stringify({overdueState:'overdue',reviewerName:'Synthetic Operations',reason:'Synthetic review after follow-up',expectedRevision:opsHistory.entries[0].id,followUpStage:'legal_review_requested'})})).status,201);
  assert.equal((await request('/api/operations/logout',{method:'POST',headers:{...collectionsViewerHeaders,Origin:'https://satima.example'},body:'{}'})).status,200);
- assert.equal((await request('/api/operations/collections/export.csv',{headers:collectionsViewerHeaders})).status,401);
+ assert.equal((await request('/api/operations/collections/export.csv',{headers:collectionsViewerHeaders})).status,401);assert.equal((await request('/api/operations/daily-reports/export.csv',{headers:collectionsViewerHeaders})).status,401);
  assert.equal((await request('/api/logout',{method:'POST',headers:financeHeaders,body:'{}'})).status,200);
  assert.equal((await request('/api/collections/export.csv',{headers:financeHeaders})).status,401);
  phase='administrator login';
  const login=await request('/api/login',{method:'POST',headers:{Origin:'https://satima.example'},body:JSON.stringify({username:'admin',password:cmsSecret})});
 assert.equal(login.status,200);assert.match(login.headers.get('set-cookie'),/; Secure/);
  const headers={Origin:'https://satima.example',Cookie:login.headers.get('set-cookie').split(';')[0],'Content-Type':'application/json'};
+ assert.equal((await request('/daily-reports',{headers})).status,200);assert.equal((await request('/api/daily-reports',{headers})).status,200);assert.equal((await request('/api/daily-reports/daily-reports.js',{headers})).status,200);assert.equal((await request('/api/daily-reports/export.csv',{headers})).status,200);
  phase='administrator draft and farmer workflow';
  assert.equal((await request('/api/collections',{headers})).status,200);
  const draftCookie=login.headers.get('set-cookie').match(/satima_draft_device=[a-f0-9]{64}/)?.[0];

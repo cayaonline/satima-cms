@@ -1,4 +1,5 @@
 import {collectionsRoutes} from './collections.mjs';
+import {dailyReportsRoutes} from './daily-reports.mjs';
 import {PersistentSessionStore,LoginLimiter,validViewerHash,verifyViewerPassword} from './security.mjs';
 import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
@@ -38,6 +39,7 @@ const hash=s=>createHash('sha256').update(s).digest();
 const policy=requestPolicy(),port=policy.port,secureCookie=policy.secure?'; Secure':'';
 const files={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/navigation.js':['navigation.js','text/javascript'],'/dates.js':['dates.js','text/javascript'],'/flagged-review.js':['flagged-review.js','text/javascript'],'/customers.js':['customers.js','text/javascript'],'/distributors.js':['distributors.js','text/javascript'],'/photo-tools.js':['photo-tools.js','text/javascript'],'/milk.js':['milk.js','text/javascript'],'/milk-operations.js':['milk-operations.js','text/javascript'],'/kra-ui.js':['kra-ui.js','text/javascript'],'/login.js':['login.js','text/javascript'],'/style.css':['style.css','text/css'],'/operations.js':['operations.js','text/javascript'],'/portrait-placeholder.svg':['portrait-placeholder.svg','image/svg+xml'],'/favicon.ico':['favicon.ico','image/x-icon'],'/favicon-32.png':['favicon-32.png','image/png'],'/apple-touch-icon.png':['apple-touch-icon.png','image/png'],'/icon-192.png':['icon-192.png','image/png'],'/icon-512.png':['icon-512.png','image/png'],'/site.webmanifest':['site.webmanifest','application/manifest+json']};
 files['/collections-shell.js']=['collections-shell.js','text/javascript'];
+files['/daily-reports.css']=['daily-reports.css','text/css'];
 files['/collections-simple.js']=['collections-simple.js','text/javascript'];
 files['/collections-simple.css']=['collections-simple.css','text/css'];
 files['/collections-retail.js']=['collections-retail.js','text/javascript'];
@@ -160,6 +162,10 @@ const server=http.createServer(async(req,res)=>{
  if(!policy.hostAllowed(req.headers.host))throw new Problem(403,'Invalid application host.');
  const url=new URL(req.url,'http://'+req.headers.host),path=url.pathname;
  if(!['GET','HEAD'].includes(req.method)&&!policy.writeAllowed(req.headers.host,req.headers.origin))throw new Problem(403,'Use the application to submit changes.');
+ if(path==='/daily-reports'||path.startsWith('/api/daily-reports')||path==='/operations/daily-reports'||path.startsWith('/api/operations/daily-reports')){
+  const role=await sessions.role(cookieToken(req)),viewer=await viewerSession(req);
+  if(await dailyReportsRoutes(req,res,path,url,{pool,role:role==='finance'&&!financeEnabled?null:role,viewerRole:viewer?.role}))return;
+ }
  if(path==='/collections'||path.startsWith('/api/collections')||path==='/operations/collections'||path.startsWith('/api/operations/collections')||path==='/'){
   const role=await sessions.role(cookieToken(req)),viewer=await viewerSession(req);
   if(await collectionsRoutes(req,res,path,url,{pool,role:role==='finance'&&!financeEnabled?null:role,viewerRole:viewer?.role,readBody:()=>body(req),actor:path.includes('/operations')?(viewer?.role==='registration_viewer'?registrationViewerUsername:viewerUsername):(role==='finance'?financeUsername:'admin')}))return;

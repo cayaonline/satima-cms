@@ -83,6 +83,7 @@ UUIDs use built-in `gen_random_uuid()`. `customer_id` uses an atomic PostgreSQL 
 - [Future schema and technical debt](docs/future-schema.md)
 - [Inspection SQL](database/schema/sample-queries.sql)
 - [Validation report](docs/validation.md)
+- [Daily Reports](docs/daily-reports.md)
 
 The application uses the restricted `satima_app` database role, not the administrator. A shared operator password protects all farmer endpoints; cookies are HttpOnly/SameSite=Strict, writes require the configured Origin, and sessions expire after eight hours or app restart. Local services bind to localhost. The optional Render deployment uses HTTPS, Secure cookies and the same shared operator login; it does not provide individual staff identities. Share access only with trusted operators.
 

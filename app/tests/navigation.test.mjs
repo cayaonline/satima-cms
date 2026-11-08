@@ -7,7 +7,8 @@ const operationsHtml = await readFile(new URL('../public/operations.html', impor
 const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
 const js = await readFile(new URL('../public/navigation.js', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
-const expected = ['home', 'collections', 'farmers', 'customers', 'distributors', 'milk', 'processing', 'distribution', 'support'];
+const collections = await readFile(new URL('../collections.mjs', import.meta.url), 'utf8');
+const expected = ['home', 'collections', 'daily-reports', 'farmers', 'customers', 'distributors', 'milk', 'processing', 'distribution', 'support'];
 
 function navLinks(html) {
   return [...html.matchAll(/<a class="nav" data-nav="([^"]+)" href="([^"]+)"/g)]
@@ -18,11 +19,11 @@ test('admin and operations shells place Collections below Home and retain existi
   assert.deepEqual(navLinks(adminHtml).map(link => link.key), expected);
   assert.deepEqual(navLinks(operationsHtml).map(link => link.key), expected);
   assert.deepEqual(navLinks(adminHtml).map(link => link.href), [
-    '/', '/collections', '/farmers', '/customers', '/distributors', '/milk-collection',
+    '/', '/collections', '/daily-reports', '/farmers', '/customers', '/distributors', '/milk-collection',
     '/milk-processing', '/milk-distribution', '/contact-support',
   ]);
   assert.deepEqual(navLinks(operationsHtml).map(link => link.href), [
-    '/operations', '/operations/collections', '/operations/farmers', '/operations/customers', '/operations/distributors',
+    '/operations', '/operations/collections', '/operations/daily-reports', '/operations/farmers', '/operations/customers', '/operations/distributors',
     '/operations/milk-collection', '/operations/milk-processing',
     '/operations/milk-distribution', '/operations/contact-support',
   ]);
@@ -62,4 +63,9 @@ test('responsive navigation includes mobile drawer, desktop collapse, reduced mo
 
 test('server serves the shared navigation controller as a public static asset', () => {
   assert.match(server, /'\/navigation\.js':\['navigation\.js','text\/javascript'\]/);
+});
+
+test('Finance Collections shell removes Daily Reports from the retained Overview group',()=>{
+  assert.match(collections,/data-nav=\"daily-reports\"/);
+  assert.match(collections,/role==='finance'\)workspace=workspace\.replace\(\/<a class=\"nav\" data-nav=\"daily-reports\"/);
 });
