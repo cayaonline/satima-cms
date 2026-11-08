@@ -29,7 +29,7 @@ export function preparePresentation(html,records){
   .replace('onclick="window.print()"','id="printBtn"');
  if(/<script|\son[a-z]+\s*=/i.test(markup))throw new Error('Unexpected executable dashboard markup.');
  return {html:markup,css:style.replace(':root',':host')+`
- :host{display:block;min-width:0;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+ :host{display:block;min-width:0;color:var(--ink);font-family:inherit}
  .app{display:block;min-height:0}main{padding:28px clamp(14px,3vw,40px);margin:0 auto}
  .collections-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:24px;padding:7px;background:var(--nav);border-radius:12px}
  .kpi-value{font-size:clamp(18px,1.8vw,28px)}

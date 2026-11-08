@@ -9,3 +9,14 @@ test('monthly sales reports remain distinct from payments, balances and historic
  assert.match(salesCsv(r,new URLSearchParams({period:'2026-07'})),/July Invoices\.xls/);
  assert.equal((await salesData({query:async()=>({rows:[]})})).available,false);
 });
+
+test('PostgreSQL DATE values format into stable ISO report periods',async()=>{
+ const payload={summary:{},homes:[],stores:[]};
+ const r=await salesData({query:async()=>({rows:[
+  {id:'october-sales-2026',payload,reporting_month:new Date('2026-10-01T00:00:00.000Z')},
+  {id:'sales-2026-09',payload,reporting_month:new Date('2026-09-01T00:00:00.000Z')},
+  {id:'sales-2026-08',payload,reporting_month:new Date('2026-08-01T00:00:00.000Z')},
+  {id:'sales-2026-07',payload,reporting_month:new Date('2026-07-01T00:00:00.000Z')},
+ ]})});
+ assert.deepEqual(r.reports.map(report=>report.reportingMonth),['2026-10','2026-09','2026-08','2026-07']);
+});
