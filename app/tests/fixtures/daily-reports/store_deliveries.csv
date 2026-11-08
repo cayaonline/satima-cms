@@ -1,2 +1,4 @@
-report_id,operational_date,is_current_version,store_name_std,qty_1l_bottles,qty_500ml_bottles
-fictional-eod-1,2026-07-01,true,Fictional Ridge Outlet,2,2
+report_id,operational_date,report_type,is_current_version,store_name_std,qty_1l_bottles,qty_500ml_bottles,litres_calculated
+fictional-eod-1,2026-07-01,EOD,true,Fictional Ridge Outlet,2,2,
+fictional-eod-1,2026-07-01,EOD,true,Capital Center,,,6
+fictional-manifest-1,2026-07-01,Manifest,true,Fictional Plan Outlet,20,0,99
