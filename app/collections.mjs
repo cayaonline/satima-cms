@@ -55,7 +55,7 @@ async function shell(role,home=false){
  let workspace=index.slice(index.indexOf('<div id="workspace"'),index.indexOf('</header>')+9).replace('id="workspace" hidden','id="workspace"');
  if(role==='finance')workspace=workspace.replace(/<div class="nav-group">[\s\S]*?<\/div>/g,group=>group.includes('data-nav="home"')?group:'').replaceAll('Admin Panel','Finance').replaceAll('Administrator','Finance');
  workspace=workspace.replace(/(id="breadcrumb">)[^<]*/,(_,prefix)=>prefix+(home?'Home':'Collections'));
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-retail.js" defer></script><script src="/collections-refinement.js" defer></script><script src="/collections-simple.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>October receivables are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading October receivables…</p></div>'}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satima CMS · ${home?'Home':'Collections'}</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/collections-shell.css"><script src="/navigation.js" defer></script><script src="/collections-shell.js" defer></script><script src="/collections-retail.js" defer></script><script src="/collections-refinement.js" defer></script><script src="/collections-simple.js" defer></script>${home?'':`<script src="${apiBase}/dashboard.js" defer></script>`}</head><body>${workspace}${home?'<section class="content"><h1>Finance workspace</h1><p>Invoice and receivables reports are available in Collections.</p><a class="primary" href="/collections">Open Collections</a></section>':'<div id="collections-dashboard"><p class="content" role="status">Loading Collections…</p></div>'}</main></div></body></html>`;
 }
 
 export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,readBody,actor}){
@@ -88,8 +88,12 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(await shell(role,path==='/'));return true;
  }
  if(path==='/api/collections/sales/export.csv'){
-  const sales=await salesData(pool);if(!sales.available)throw problem(503,'October invoice source has not been imported.');
-  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="October_Sales_Report.csv"'});res.end(salesCsv(sales,url.searchParams));return true;
+  const sales=await salesData(pool);if(!sales.available)throw problem(503,'No invoice sources have been imported.');
+  const requestedPeriod=url.searchParams.get('period');
+  if(requestedPeriod&&!/^2026-(0[7-9]|10)$/.test(requestedPeriod))throw problem(400,'Invalid invoice report period.');
+  if(requestedPeriod&&!sales.reports.some(report=>report.reportingMonth===requestedPeriod))throw problem(404,'No invoice source is available for that period.');
+  const period=requestedPeriod||sales.reportingMonth;
+  res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="${period}_Sales_Report.csv"`});res.end(salesCsv(sales,url.searchParams));return true;
  }
  if(path==='/api/collections/retail/naivas/export.csv'){
   const retail=await retailData(pool);if(!retail.available)throw problem(503,'No Naivas statement has been imported.');

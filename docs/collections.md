@@ -231,6 +231,36 @@ formula neutralization. Parent distributors are separate from store branches.
 Naivas branch details remain available; other distributor totals have no inferred
 branches, statement balances or payment figures.
 
+### July–September 2026 invoice reports
+
+Three earlier mixed-channel workbooks are archived as separate immutable sources
+(`sales-2026-07`, `sales-2026-08`, `sales-2026-09`) using the original `.xls`
+bytes and SHA-256. The private `import-monthly-invoices.mjs` utility converts a
+temporary working copy with LibreOffice, validates the worksheet formulas and
+recomputes Home Customers and distributor totals from source rows using Decimal.
+The original upload remains the archived evidence. The stated year follows the
+July–September filenames and October 2026 reporting context; source invoice dates,
+payment statuses, due dates, remittances and bank receipts are not supplied and
+remain unknown. No customer-level identity matching or collection-rate estimate
+is performed.
+
+The Collections period selector shows each archived month separately. CSV exports
+accept a validated `period` parameter. July, August, September and October are
+not added together in a single collection KPI. The October Naivas statement is
+only compared to October sales; earlier month views do not compare it to a
+different period. Validate privately before import with:
+
+```sh
+node app/scripts/import-monthly-invoices.mjs --validate-only "/private/July Invoices.xls"
+node app/scripts/import-monthly-invoices.mjs --validate-only "/private/August Invoices.xls"
+node app/scripts/import-monthly-invoices.mjs --validate-only "/private/September Invoices.xls"
+```
+
+The same commands without `--validate-only` archive the original bytes and
+validated report payload through the private `ADMIN_DATABASE_URL` connection.
+Identical source hashes are no-ops; a different source for an occupied month
+requires a reviewed version rather than overwriting archived evidence.
+
 ### Deployment sequence after review
 
 1. Preserve the existing backup and migration checksum workflow.
