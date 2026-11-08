@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
 import {canonicalRows,normalizedPhone,planSync} from '../scripts/master-sync-core.mjs';
 
 test('Kenyan phone forms normalize to one identity',()=>{
@@ -45,7 +46,7 @@ test('private Excel reader handles shared strings and column gaps',async t=>{
   const path=join(directory,'fixture.xlsx');
   const py=`import zipfile,sys\np=sys.argv[1]\nwith zipfile.ZipFile(p,'w') as z:\n z.writestr('xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>')\n z.writestr('xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/></Relationships>')\n z.writestr('xl/worksheets/sheet1.xml','<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="C2" t="inlineStr"><is><t>0712345678</t></is></c></row></sheetData></worksheet>')\n z.writestr('xl/sharedStrings.xml','<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>NAME</t></si><si><t>PHONE. NO</t></si><si><t>Example Person</t></si></sst>')`;
   assert.equal(spawnSync('python3',['-c',py,path]).status,0);
-  const parsed=spawnSync('python3',[new URL('../scripts/xlsx-rows.py',import.meta.url).pathname,path],{encoding:'utf8'});
+  const parsed=spawnSync('python3',[fileURLToPath(new URL('../scripts/xlsx-rows.py',import.meta.url)),path],{encoding:'utf8'});
   assert.equal(parsed.status,0,parsed.stderr);
   const rows=canonicalRows('customers',JSON.parse(parsed.stdout));
   assert.equal(rows[0].full_name,'Example Person');assert.equal(rows[0].phone_number,'0712345678');

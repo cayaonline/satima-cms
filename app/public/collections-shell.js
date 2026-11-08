@@ -1,6 +1,7 @@
 const operations=location.pathname.startsWith('/operations'),home=operations?'/operations':'/';
 document.querySelectorAll('[data-nav]').forEach(link=>{
- const active=link.dataset.nav===(location.pathname===home?'home':'collections');
+ const page=location.pathname.endsWith('/daily-reports')?'daily-reports':location.pathname.endsWith('/collections')?'collections':'home';
+ const active=link.dataset.nav===page;
  link.classList.toggle('active',active);
  if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
 });
