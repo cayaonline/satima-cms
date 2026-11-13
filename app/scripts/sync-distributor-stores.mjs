@@ -69,7 +69,7 @@ async function compare(){
   const expected=byDistributor.get(distributorKey(s.Distributor))||missingDistributors.find(x=>x.key===distributorKey(s.Distributor));
   const parentKey=e.parent_name?distributorKey(e.parent_name):null;
   if(expected&&!e.parent_id)parentFixes.push({id:e.id,name:e.name,parent_id:expected.id||null,parent_key:expected.key,parent_name:expected.name,source_row:s.source_row});
-  else if(expected&&parentKey!==distributorKey(expected.name))parentConflicts.push({name:e.name,current_parent:e.parent_name||null,expected_parent:expected.name,source_row:s.source_row});
+  else if(expected&&parentKey!==expected.key)parentConflicts.push({name:e.name,current_parent:e.parent_name||null,expected_parent:expected.name,source_row:s.source_row});
  }
  const plan={source_sha256:sourceHash,source_rows:source.length,existing_count:existing.length,already_distributors:distributors.filter(x=>byDistributor.has(x.key)).map(x=>({source_name:x.name,cms_name:byDistributor.get(x.key).name})),already_in_cms:storeMatches.map(x=>({distributor:x.source.Distributor,store:x.source.Store,cms_name:x.existing.name,parent:x.existing.parent_name||null})),missing_distributors:missingDistributors,missing_stores:missingStores,contacts_to_fill:contactFills,contact_conflicts:conflicts,parent_fixes:parentFixes,parent_conflicts:parentConflicts,in_cms_not_in_csv:inCmsNotSource.map(x=>({name:x.name,parent:x.parent_name||null,record_type:x.record_type}))};
  plan.plan_sha256=createHash('sha256').update(JSON.stringify(plan)).digest('hex');
