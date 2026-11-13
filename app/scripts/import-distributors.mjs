@@ -16,7 +16,7 @@ for(const row of plan.records){
  assert(['distributor','store'].includes(row.record_type),'Invalid type.');
  const name=row.name.toLowerCase().replace(/[^a-z0-9]/g,'');assert(!names.has(name),'Duplicate normalized name.');names.add(name);
  if(row.parent_row!=null)assert(row.record_type==='store'&&Number.isInteger(row.parent_row)&&row.parent_row<row.row,'Invalid parent.');
- for(const field of ['route_name','manager_name','phone_number','location'])assert(row[field]==null||typeof row[field]==='string'&&row[field].length<=300,'Invalid field.');
+ for(const field of ['route_name','lines_person_name','phone_number','location'])assert(row[field]==null||typeof row[field]==='string'&&row[field].length<=300,'Invalid field.');
 }
 assert(plan.records.every(row=>row.parent_row==null||plan.records.some(parent=>parent.row===row.parent_row&&parent.record_type==='distributor')),'Missing parent.');
 if(mode!=='apply'){console.log(JSON.stringify({valid:true,source_rows:seen.size,distributors:plan.records.filter(r=>r.record_type==='distributor').length,stores:plan.records.filter(r=>r.record_type==='store').length}));process.exit(0);}
@@ -29,7 +29,7 @@ try{
  const {rows:[existing]}=await db.query('SELECT count(*)::int AS n FROM distributors');assert.equal(existing.n,0,'Existing distributors require reconciliation.');
  const ids=new Map();
  for(const row of plan.records){
-  const {rows:[saved]}=await db.query('INSERT INTO distributors(name,record_type,parent_id,route_name,manager_name,phone_number,location,source_sha256) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[row.name,row.record_type,row.parent_row==null?null:ids.get(row.parent_row),row.route_name,row.manager_name,row.phone_number,row.location,plan.document_sha256]);
+  const {rows:[saved]}=await db.query('INSERT INTO distributors(name,record_type,parent_id,route_name,lines_person_name,phone_number,location,source_sha256) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[row.name,row.record_type,row.parent_row==null?null:ids.get(row.parent_row),row.route_name,row.lines_person_name,row.phone_number,row.location,plan.document_sha256]);
   ids.set(row.row,saved.id);
   await db.query('INSERT INTO distributor_source_rows(document_sha256,sheet_name,row_number,distributor_id) VALUES($1,$2,$3,$4)',[plan.document_sha256,plan.sheet_name,row.row,saved.id]);
  }

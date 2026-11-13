@@ -14,6 +14,11 @@ test('Excel-style headers map to the existing customer fields without guessing e
  const [row]=canonicalRows('customers',[{source_row:2,NAME:'Example Person',ADDRESS:'Example Place','PHONE. NO':'0712345678',Neigborhood:'Unmapped source detail'}]);
  assert.equal(row.full_name,'Example Person');assert.equal(row.physical_address,'Example Place');assert.equal(row.phone_number,'0712345678');assert.equal(row.category,undefined);
 });
+test('distributor imports use Lines Person fields while accepting legacy manager headers',()=>{
+ const [row]=canonicalRows('distributors',[{source_row:2,NAME:'Example Store','PHONE. NO':'0712345678',TYPE:'store',Manager:'Alex'}]);
+ assert.equal(row.lines_person_name,'Alex');
+ assert.equal(row.phone_number,'0712345678');
+});
 test('only deterministic matches update; blanks preserve existing values',()=>{
  const existing=[{id:'one',customer_id:'C0001',full_name:'Example Person',phone_number:'0712345678',physical_address:'Old',category:'Current Customers'}];
  const plan=planSync('customers',[{source_row:2,full_name:' EXAMPLE   PERSON ',phone_number:'+254712345678',physical_address:'New',category:''}],existing);

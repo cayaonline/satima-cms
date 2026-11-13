@@ -2,7 +2,7 @@
 export const schema={
  farmers:{table:'farmers',code:'customer_id',name:'full_name',phone:'primary_phone',fields:['full_name','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','category'],columns:['id','customer_id','full_name','primary_phone','physical_address','village_area','sub_location','location','sub_county','county','category']},
  customers:{table:'customers',code:'customer_id',name:'full_name',phone:'phone_number',fields:['full_name','phone_number','physical_address','category'],columns:['id','customer_id','full_name','phone_number','physical_address','category']},
- distributors:{table:'distributors',code:'distributor_code',name:'name',phone:'phone_number',fields:['name','phone_number','location','route_name','manager_name'],columns:['id','distributor_code','store_code','name','phone_number','location','route_name','manager_name','record_type','parent_id']}
+ distributors:{table:'distributors',code:'distributor_code',name:'name',phone:'phone_number',fields:['name','phone_number','location','route_name','lines_person_name'],columns:['id','distributor_code','store_code','name','phone_number','location','route_name','lines_person_name','record_type','parent_id']}
 };
 export const normalizedName=value=>String(value||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('en');
 export function canonicalRows(entity,rows){
@@ -13,7 +13,7 @@ export function canonicalRows(entity,rows){
   [spec.code]:['customerid','farmerid','distributorid','storeid'],
   category:['category','suppliercategory','customercategory'],
   physical_address:['address','physicaladdress','addresslocation',...(entity==='customers'?['location','town']:[])],
-  location:entity==='customers'?[]:['location','town'],route_name:['route','routename'],manager_name:['manager','managername'],
+  location:entity==='customers'?[]:['location','town'],route_name:['route','routename'],lines_person_name:['linesperson','linespersonname','manager','managername'],
   record_type:['type','recordtype'],parent_code:['parent','parentcode','parentdistributor']
  };
  const lookup=new Map();for(const [field,names] of Object.entries(aliases))for(const name of names)lookup.set(name,field);
