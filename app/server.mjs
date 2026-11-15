@@ -5,7 +5,7 @@ import {listFarmers} from './directory.mjs';
 import {listKra,kraHistory,recordKraCheck} from './kra-verification.mjs';
 import {listOperationsFarmers,operationsFarmerDetail,operationsFarmerRegistrationDetail} from './operations-directory.mjs';
 import {listFlaggedSuppliers,flaggedSupplierDetail,reviewFlaggedSupplier} from './flagged-suppliers.mjs';
-import {listCustomers,customerDetail,customerCategoryRoutes} from './customers.mjs';
+import {listCustomers,customerDetail,updateCustomer,reviewCustomerGender,bulkReviewCustomerGender,customerCategoryRoutes} from './customers.mjs';
 import {listDistributors,distributorDetail,updateDistributor,distributorAudit} from './distributors.mjs';
 import {milkSubmission,saveMilkCollection,updateMilkCollection,searchMilkFarmers,listMilkCollections,milkSummary,milkDetail,milkPhoto,farmerMilkHistory} from './milk-collection.mjs';
 import {saveQuality,saveBatch,saveDistribution,updateDistribution,listProcessing,processingDetail,processingSummary,listBatches,batchDetail,listDistributions,distributionDetail,distributionSummary,farmerProcessingHistory,customerDistributionHistory,distributorDistributionHistory,operationAudit} from './milk-operations.mjs';
@@ -299,6 +299,7 @@ const server=http.createServer(async(req,res)=>{
  if(archiveEntry&&req.method==='PATCH')return send(res,200,await saveArchiveEntry(archiveEntry[1],await body(req),archiveEntry[2]));
  if(path==='/api/farmers'&&req.method==='GET')return send(res,200,await listFarmers(pool,url.searchParams));
  if(path==='/api/customers'&&req.method==='GET')return send(res,200,await listCustomers(pool,url.searchParams));
+ if(path==='/api/customers/gender-review/bulk'&&req.method==='POST'){const input=await body(req);return send(res,200,await transaction(c=>bulkReviewCustomerGender(c,input.ids,input.action,'admin'),'admin'));}
  if(path==='/api/distributors'&&req.method==='GET')return send(res,200,await listDistributors(pool,url.searchParams));
  const adminDistributorAudit=path.match(/^\/api\/distributors\/([^/]+)\/audit$/);
  if(adminDistributorAudit&&req.method==='GET')return send(res,200,await distributorAudit(pool,adminDistributorAudit[1]));
@@ -308,7 +309,12 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='PATCH'){const input=await body(req);return send(res,200,await transaction(c=>updateDistributor(c,adminDistributor[1],input,'admin')));}
  }
  const adminCustomer=path.match(/^\/api\/customers\/([^/]+)$/);
- if(adminCustomer&&req.method==='GET'){if(!uuid.test(adminCustomer[1]))throw new Problem(400,'Invalid customer identifier.');return send(res,200,await customerDetail(pool,adminCustomer[1]));}
+ if(adminCustomer){if(!uuid.test(adminCustomer[1]))throw new Problem(400,'Invalid customer identifier.');
+  if(req.method==='GET')return send(res,200,await customerDetail(pool,adminCustomer[1]));
+  if(req.method==='PUT'){const input=await body(req);return send(res,200,await transaction(c=>updateCustomer(c,adminCustomer[1],input,'admin'),'admin'));}
+ }
+ const customerGenderReview=path.match(/^\/api\/customers\/([^/]+)\/gender-review$/);
+ if(customerGenderReview&&req.method==='POST'){if(!uuid.test(customerGenderReview[1]))throw new Problem(400,'Invalid customer identifier.');const input=await body(req);return send(res,200,await transaction(c=>reviewCustomerGender(c,customerGenderReview[1],input,'admin'),'admin'));}
  if(path==='/api/flagged-records'&&req.method==='GET')return send(res,200,await listFlaggedSuppliers(pool));
  const flaggedReview=path.match(/^\/api\/flagged-records\/([a-f0-9-]{36})$/i);
  if(flaggedReview){if(req.method==='GET')return send(res,200,await flaggedSupplierDetail(pool,flaggedReview[1]));
