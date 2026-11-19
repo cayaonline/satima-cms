@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import pg from 'pg';
+import {insertInvoiceProjection} from '../collections-ledger.mjs';
 
 const source=process.argv.at(-1), validateOnly=process.argv.includes('--validate-only');
 const periods={'July Invoices.xls':'2026-07','August Invoices.xls':'2026-08','September Invoices.xls':'2026-09'};
@@ -28,6 +29,7 @@ try{
  else{
   await db.query('INSERT INTO collections_sales_evidence(id,filename,sha256,original_bytes) VALUES($1,$2,$3,$4)',[id,filename,sha,bytes]);
   await db.query('INSERT INTO collections_sales_reports(id,reporting_month,payload) VALUES($1,$2,$3)',[id,`${period}-01`,payload]);
+  await insertInvoiceProjection(db,id,period,payload);
  }
  await db.query('COMMIT');console.log(existing?'Identical source already archived.':'Monthly invoice source archived:',JSON.stringify({...payload.summary,period}));
 }catch(e){await db.query('ROLLBACK').catch(()=>{});console.error('Monthly invoice import failed:',e.code||e.message);process.exitCode=1;}finally{await db.end();}

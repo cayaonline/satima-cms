@@ -1,6 +1,7 @@
 import {salesData,salesCsv} from './collections-sales.mjs';
 import {retailData,retailCsv} from './collections-retail.mjs';
 import {channelsData,reviewHistory,saveReview} from './collections-refinement.mjs';
+import {saveHomeStatus,recordPayment,allocateUnmatchedPayment,recordCredit,recordPaymentReversal} from './collections-ledger.mjs';
 import {readFile} from 'node:fs/promises';
 
 export const collectionsAllowed = role => role === 'administrator' || role === 'finance' || role === 'head_of_operations';
@@ -68,7 +69,12 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
  if(operations){path=path.replace('/api/operations/collections','/api/collections').replace('/operations/collections','/collections');role=headOfOperations?'head_of_operations':null;}
  const apiBase=operations?'/api/operations/collections':'/api/collections';
  const review=path.match(/^\/api\/collections\/accounts\/(\d+)\/reviews$/);
- if(!review&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/collections/retail/naivas/export.csv','/api/collections/sales/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
+ const homeStatus=path==='/api/collections/home-payment-status';
+ const payments=path==='/api/collections/payments';
+ const paymentAllocation=path==='/api/collections/payment-allocations';
+ const credit=path==='/api/collections/invoice-credits';
+ const reversal=path==='/api/collections/payment-reversals';
+ if(!review&&!homeStatus&&!payments&&!paymentAllocation&&!credit&&!reversal&&!['/collections','/api/collections','/api/collections/dashboard.js','/api/collections/export.csv','/api/collections/retail/naivas/export.csv','/api/collections/sales/export.csv'].includes(path)&&!(path==='/'&&role==='finance'))return false;
  if(!collectionsAllowed(role)){
   if(path==='/collections'&&!role&&!viewerRole){res.writeHead(303,{Location:operations?'/operations':'/'});res.end();return true;}
   throw problem(role||viewerRole?403:401,'Admin, Finance or Head of Operations access is required.');
@@ -80,6 +86,13 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
   else if(req.method==='POST')result=await saveReview(pool,row,await readBody(),`${actor||role} (${role})`);
   else throw problem(405,'Unsupported review request.');
   res.writeHead(req.method==='POST'?201:200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));return true;
+ }
+ if(homeStatus||payments||paymentAllocation||credit||reversal){
+  if(role!=='administrator'&&role!=='finance')throw problem(403,'Home Customer status and payment entry are available to Admin and Finance users only.');
+  if(req.method!=='POST')throw problem(405,'Use POST to record a reviewed status or verified payment.');
+  res.setHeader('Cache-Control','private, no-store');
+  const input=await readBody(),who=`${actor||role} (${role})`,result=homeStatus?await saveHomeStatus(pool,input,who):payments?await recordPayment(pool,input,who):paymentAllocation?await allocateUnmatchedPayment(pool,input,who):credit?await recordCredit(pool,input,who):await recordPaymentReversal(pool,input,who);
+  res.writeHead(201,{'Content-Type':'application/json'});res.end(JSON.stringify(result));return true;
  }
  if(req.method!=='GET')throw problem(405,'Financial source records are read-only.');
  res.setHeader('Cache-Control','private, no-store');
@@ -104,12 +117,12 @@ export async function collectionsRoutes(req,res,path,url,{pool,role,viewerRole,r
  if(!snapshot)throw problem(503,'October source files have not been imported. Contact your administrator.');
  const {payload,presentation}=snapshot;
  if(path==='/api/collections'){
-  const channels=await channelsData(pool,payload.records);
+  const channels=await channelsData(pool,payload.records,{includePaymentLedger:role==='administrator'||role==='finance'});
   res.writeHead(200,{'Content-Type':'application/json'});
   res.end(JSON.stringify({...channels,summary:payload.summary,sheet:payload.sheet,workbookSha256:snapshot.workbook_sha256,html:presentation.html,css:presentation.css}));return true;
  }
  if(path.endsWith('/export.csv')){
-  const csv=exportCsv((await channelsData(pool,payload.records)).records,url.searchParams);
+  const csv=exportCsv((await channelsData(pool,payload.records,{includePaymentLedger:false})).records,url.searchParams);
   res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="Satima_October_Receivables_Filtered.csv"'});res.end(csv);return true;
  }
  res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});

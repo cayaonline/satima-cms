@@ -1,4 +1,5 @@
 import {salesData} from './collections-sales.mjs';
+import {enrichSalesLedger} from './collections-ledger.mjs';
 import {retailData} from './collections-retail.mjs';
 const problem=(status,message)=>Object.assign(new Error(message),{status});
 const stages=['contact_planned','contacted','promise_to_pay','disputed','legal_review_requested','legal_referred','closed'];
@@ -32,14 +33,15 @@ export function homeSummary(records){
   invoiceDateUnknownCount:records.filter(r=>!r.invoiceDate).length,followUpsRecorded:records.filter(r=>r.followUpStage).length,
   legalReviewsRecorded:records.filter(r=>['legal_review_requested','legal_referred'].includes(r.followUpStage)).length};
 }
-export async function channelsData(pool,records){
+export async function channelsData(pool,records,{includePaymentLedger=true}={}){
  const [source,latest,retailers,retail,sales]=await Promise.all([
   pool.query("SELECT * FROM collections_home_accounts WHERE dataset_id='october' ORDER BY source_row"),
   pool.query("SELECT DISTINCT ON (source_row) * FROM collections_account_reviews WHERE dataset_id='october' ORDER BY source_row,id DESC"),
   pool.query('SELECT code,name,source_status FROM collections_retailers ORDER BY code'),retailData(pool),salesData(pool)
  ]);
- const enriched=enrichHome(records,source.rows,latest.rows);
- return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail,sales,
+ const enriched=enrichHome(records,source.rows,latest.rows),ledgerSales=includePaymentLedger?await enrichSalesLedger(pool,sales):sales;
+ const customerDirectory=includePaymentLedger?(await pool.query('SELECT id::text,customer_id,full_name FROM customers ORDER BY lower(full_name),customer_id')).rows:undefined;
+ return {records:enriched,home:homeSummary(enriched),retailers:retailers.rows,retail,sales:ledgerSales,...(customerDirectory?{customerDirectory}:{}),
   reporting:{label:'Customer receivables snapshot supplied in the October workbook',invoiceMonth:null,invoiceDate:null,snapshotAsOf:null,classificationBasis:'Home Customers channel assigned by owner clarification, not inferred from account names.',companyCollectionRate:null}};
 }
 export async function reviewHistory(pool,row,before){
