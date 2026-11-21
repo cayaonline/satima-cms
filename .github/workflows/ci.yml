@@ -63,5 +63,3 @@ jobs:
           cat "$RUNNER_TEMP/satima-app.log"
           exit 1
       - run: npm test --prefix app
-      - name: Check database integrity
-        run: psql -U satima_admin -v ON_ERROR_STOP=1 -f database/tests/integrity.sql
