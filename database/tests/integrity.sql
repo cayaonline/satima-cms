@@ -44,7 +44,7 @@ END $$;
 INSERT INTO farmer_verifications(farmer_id,verified_by,verified_at) VALUES('10000000-0000-4000-8000-000000000001','TEST','2020-01-01'), ('10000000-0000-4000-8000-000000000001','TEST','2021-01-01');
 SELECT pg_temp.must_fail($q$UPDATE farmer_verifications SET notes='overwrite' WHERE farmer_id='10000000-0000-4000-8000-000000000001'$q$,'P0001');
 SELECT pg_temp.must_fail($q$DELETE FROM farmer_verifications WHERE farmer_id='10000000-0000-4000-8000-000000000001'$q$,'P0001');
-SELECT pg_temp.must_fail($q$UPDATE farmers SET customer_id='SF-F-9999' WHERE national_id='INTEGRITY-ID'$q$,'P0001');
+SELECT pg_temp.must_fail($q$UPDATE farmers SET customer_id='SF-F-9999' WHERE national_id='INTEGRITY-ID'$q$,'23514');
 SELECT pg_temp.must_fail($q$DELETE FROM farmers WHERE national_id='INTEGRITY-ID'$q$,'23001');
 INSERT INTO farmer_consents(farmer_id,consent_version,information_accuracy_confirmed,data_processing_consent,communications_consent,consent_given,signed_name,signature_method,consent_date)
  VALUES('10000000-0000-4000-8000-000000000001','TEST',true,true,false,true,'TEST','signature','2020-01-01');
